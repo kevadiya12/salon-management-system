@@ -31,7 +31,7 @@ The frontend build runs `tsc -b` before Vite's production build. There is curren
 9. In `/admin`, add and edit a service, deactivate and reactivate it, add and edit a barber, manage staff accounts, and change availability. Update salon information and business hours, configure and clear a queue capacity, then refresh the page and verify each saved value persists.
 10. Configure a capacity of one, join one waiting customer, and verify another queue join is rejected. Clear the capacity afterward.
 
-Do not use production customer data for test queue entries. Queue mutations persist in the configured SQLite database.
+Automated backend tests use an isolated PostgreSQL-compatible in-memory database. Manual queue mutations persist in the PostgreSQL database configured by `DATABASE_URL`; do not use production customer data for test queue entries.
 
 ## Current verification scope
 

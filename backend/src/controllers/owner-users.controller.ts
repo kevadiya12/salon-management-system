@@ -1,4 +1,4 @@
-import type { DatabaseSync } from 'node:sqlite';
+import type { Database } from '../database/client.js';
 import type { RequestHandler } from 'express';
 import type { Server as SocketServer } from 'socket.io';
 import {
@@ -9,11 +9,11 @@ import {
 import { ReceptionServiceError } from '../services/reception.service.js';
 
 export function createOwnerUsersController(
-  database: DatabaseSync,
+  database: Database,
   io: SocketServer,
 ) {
-  const list: RequestHandler = (_request, response) => {
-    response.json({ success: true, data: listStaffAccounts(database) });
+  const list: RequestHandler = async (_request, response) => {
+    response.json({ success: true, data: await listStaffAccounts(database) });
   };
 
   const create: RequestHandler = async (request, response, next) => {

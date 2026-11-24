@@ -9,7 +9,7 @@ Browser (React / Vite :5173)
                                   v
                             Express + Socket.IO (:4000)
                                   |
-                            SQLite (node:sqlite)
+                            Neon PostgreSQL (pooled `pg` connections)
 ```
 
 The Vite proxy forwards both `/api` and `/socket.io` to `http://127.0.0.1:4000`; the Socket.IO proxy enables WebSocket forwarding. The frontend Socket.IO client uses the same origin by default, disables automatic connection until a view subscribes, and uses the `/socket.io` path. `VITE_SOCKET_URL` can override the default origin.
@@ -23,20 +23,20 @@ The backend creates one Node HTTP server around Express and attaches the Socket.
 - `src/services/reception.service.ts` owns queue, barber, dashboard, and wait-estimation behavior.
 - `src/services/auth.service.ts` validates account data, hashes passwords, issues/verifies JWTs, and manages account records.
 - `src/middleware/authentication.ts` validates access tokens and applies role, customer-ownership, and barber-identity checks.
-- `src/database/` opens SQLite and initializes/migrates the reception schema.
+- `src/database/` creates the PostgreSQL connection pool and initializes/migrates the schema.
 - `src/socket/` validates subscriptions and publishes queue-safe update payloads.
 - `src/services/reception.service.ts` also reads and writes owner settings in `reception_settings`.
 - `src/middleware/` handles authentication, authorization, request logging, JSON parsing errors, service errors, and unexpected errors.
 
 ## Authentication flow
 
-The frontend submits credentials to `/api/auth/login` or customer details to `/api/auth/register`. The backend stores a signed 30-minute JWT in an HttpOnly, SameSite=Strict cookie. The token is not exposed to frontend JavaScript or local storage. Authenticated requests reload the active user and token version from SQLite. Logout, staff password reset, and staff deactivation invalidate sessions. The owner setup command creates the first owner from environment-provided credentials.
+The frontend submits credentials to `/api/auth/login` or customer details to `/api/auth/register`. The backend stores a signed 30-minute JWT in an HttpOnly, SameSite=Strict cookie. The token is not exposed to frontend JavaScript or local storage. Authenticated requests reload the active user and token version from PostgreSQL. Logout, staff password reset, and staff deactivation invalidate sessions. The owner setup command creates the first owner from environment-provided credentials.
 
 HTTP CORS allows credentials only from configured frontend origins. Socket.IO reads the same cookie at connection time. Public display subscriptions remain available; reception, booking, and barber rooms enforce the associated roles and identities. Logout and account security changes disconnect the user's active sockets.
 
 ## Persistence
 
-SQLite uses write-ahead logging. Relative `DB_PATH` values resolve from the backend directory. Startup creates the schema, default service rows, and the default open queue setting; it does not create sample barbers or bookings.
+The backend uses a bounded `pg` connection pool configured by `DATABASE_URL`; Neon connections use TLS as required by the connection string. Startup idempotently creates and migrates the schema, default service rows, and the default open queue setting; it does not create sample barbers or bookings. Queue token assignment and queue state changes run in PostgreSQL transactions.
 
 ## Frontend integration
 

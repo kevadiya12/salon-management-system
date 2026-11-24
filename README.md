@@ -1,6 +1,6 @@
 # Salon Queue Management System
 
-A full-stack salon queue application built with React, Vite, TypeScript, Tailwind CSS, React Router, Express, SQLite, and Socket.IO.
+A full-stack salon queue application built with React, Vite, TypeScript, Tailwind CSS, React Router, Express, Neon PostgreSQL, and Socket.IO.
 
 ## Documentation
 
@@ -15,7 +15,7 @@ A full-stack salon queue application built with React, Vite, TypeScript, Tailwin
 
 ## Quick start
 
-Requirements: Node.js 22.13 or newer and npm.
+Requirements: Node.js 22.13 or newer, npm, and a Neon PostgreSQL database.
 
 In one terminal:
 
@@ -23,6 +23,7 @@ In one terminal:
 cd backend
 Copy-Item .env.example .env
 npm install
+# Set DATABASE_URL and JWT_SECRET in backend/.env before starting.
 npm run dev
 ```
 
@@ -36,9 +37,9 @@ npm run dev
 
 Open <http://localhost:5173>. The backend listens on port 4000 by default; the Vite development server proxies `/api` and `/socket.io` to it. The health endpoint is `GET /api/health`.
 
-The SQLite schema and three default service records are initialized at backend startup. No barbers or customers are seeded. The project currently has no authentication; do not expose its mutation or customer-data endpoints to an untrusted network.
+The PostgreSQL schema and three default service records are initialized at backend startup. No barbers or customers are seeded. API authentication and role checks protect customer and staff operations.
 
 See [setup and running](docs/07-setup-and-running.md) for environment variables and deployment notes, and [testing guide](docs/08-testing-guide.md) for validation commands.
 
 # salon-management-system
-Salon Queue Management System using React, Node.js, Express and SQLite
+Salon Queue Management System using React, Node.js, Express and Neon PostgreSQL

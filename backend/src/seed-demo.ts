@@ -73,11 +73,12 @@ function isoAtDayOffset(now: Date, dayOffset: number, hour: number, minute: numb
   return date.toISOString();
 }
 
+async function seedDemo(): Promise<void> {
 const database = createDatabase();
 
 try {
-  initializeReceptionSchema(database);
-  const ownerBefore = database
+  await initializeReceptionSchema(database);
+  const ownerBefore = await database
     .prepare("SELECT id,email,name FROM users WHERE role='OWNER'")
     .all();
 
@@ -85,14 +86,15 @@ try {
   const now = new Date();
   const timestamp = now.toISOString();
 
-  database.exec('BEGIN IMMEDIATE');
+  await database.transaction(async () => {
 
   for (const service of demoServices) {
     const [id, name, description, duration, price] = service;
-    database.prepare(`
-      INSERT OR IGNORE INTO salon_services
+    await database.prepare(`
+      INSERT INTO salon_services
         (id,name,description,duration_minutes,price_rupees,is_active,created_at,updated_at)
       VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+      ON CONFLICT DO NOTHING
     `).run(id, name, description, duration, price, timestamp, timestamp);
   }
 
@@ -100,7 +102,7 @@ try {
   for (let i = 0; i < 10; i += 1) {
     const id = demoUuid('barber', i + 1);
     barberIds.push(id);
-    database.prepare(`
+    await database.prepare(`
       INSERT INTO reception_barbers
         (id,name,photo_url,status,is_active,created_at,updated_at)
       VALUES (?, ?, NULL, 'available', 1, ?, ?)
@@ -109,10 +111,11 @@ try {
 
     const email = `demo.barber${String(i + 1).padStart(2, '0')}@example.test`;
     const username = `barber${String(i + 1).padStart(2, '0')}`;
-    database.prepare(`
-      INSERT OR IGNORE INTO users
+    await database.prepare(`
+      INSERT INTO users
         (id,name,email,username,password_hash,role,barber_id,customer_id,is_active,token_version,created_at,updated_at)
       VALUES (?, ?, ?, ?, ?, 'BARBER', ?, NULL, 1, 0, ?, ?)
+      ON CONFLICT DO NOTHING
     `).run(randomUUID(), barberNames[i], email, username, passwordHash, id, timestamp, timestamp);
   }
 
@@ -125,16 +128,17 @@ try {
     const registeredAt = isoAtDayOffset(now, -(120 - i), 10, 30);
     customerIds.push(customerId);
 
-    database.prepare(`
+    await database.prepare(`
       INSERT INTO customers (id,name,phone_number,created_at,updated_at)
       VALUES (?, ?, ?, ?, ?)
       ON CONFLICT(id) DO NOTHING
     `).run(customerId, name, phone, registeredAt, registeredAt);
 
-    database.prepare(`
-      INSERT OR IGNORE INTO users
+    await database.prepare(`
+      INSERT INTO users
         (id,name,email,username,password_hash,role,barber_id,customer_id,is_active,token_version,created_at,updated_at)
       VALUES (?, ?, ?, NULL, ?, 'CUSTOMER', NULL, ?, 1, 0, ?, ?)
+      ON CONFLICT DO NOTHING
     `).run(randomUUID(), name, email, passwordHash, customerId, registeredAt, registeredAt);
   }
 
@@ -145,10 +149,11 @@ try {
     ['salon_name', 'Demo Salon Queue'],
   ];
   for (const [key, value] of settings) {
-    database.prepare(`
-      INSERT OR IGNORE INTO reception_settings
+    await database.prepare(`
+      INSERT INTO reception_settings
         (setting_key,setting_value,created_at,updated_at)
       VALUES (?, ?, ?, ?)
+      ON CONFLICT DO NOTHING
     `).run(key, value, timestamp, timestamp);
   }
 
@@ -162,21 +167,24 @@ try {
   ];
 
   const insertBooking = database.prepare(`
-    INSERT OR IGNORE INTO reception_bookings
+    INSERT INTO reception_bookings
       (id,token,token_day,customer_id,customer_name,phone_number,service_ids,
        duration_minutes,total_price_rupees,booking_source,preferred_barber_id,
        assigned_barber_id,status,created_at,updated_at,called_at,service_started_at,completed_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'customer', ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT DO NOTHING
   `);
   const insertBookingService = database.prepare(`
-    INSERT OR IGNORE INTO booking_services
+    INSERT INTO booking_services
       (booking_id,service_id,service_name,duration_minutes,price_rupees)
     VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT DO NOTHING
   `);
   const insertServiceRecord = database.prepare(`
-    INSERT OR IGNORE INTO service_records
+    INSERT INTO service_records
       (id,booking_id,barber_id,started_at,completed_at,created_at,updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT DO NOTHING
   `);
   const serviceRows = demoServices.map((service) => ({
     id: service[0],
@@ -195,9 +203,12 @@ try {
           : status === 'in_service' ? 30 + (i - 295)
             : i % 100;
     const customerId = customerIds[customerIndex];
-    const customerNameRow = database.prepare(
+    const customerNameRow = await database.prepare(
       'SELECT name,phone_number FROM customers WHERE id=?',
-    ).get(customerId) as { name: string; phone_number: string };
+    ).get(customerId);
+    if (!customerNameRow) {
+      throw new Error(`Demo customer could not be loaded: ${customerId}`);
+    }
     const dayIndex = Math.floor(i / 5);
     const dayOffset = dayIndex - 59;
     const tokenSequence = (i % 5) + 1;
@@ -232,7 +243,7 @@ try {
       ? isoAtDayOffset(now, dayOffset, 12, Math.min(55, 0 + duration))
       : null;
 
-    insertBooking.run(
+    await insertBooking.run(
       bookingId,
       `D-${String(i + 1).padStart(4, '0')}`,
       dayString,
@@ -252,7 +263,7 @@ try {
       completedAt,
     );
 
-    const bookingCreated = database
+    const bookingCreated = await database
       .prepare('SELECT id FROM reception_bookings WHERE id=?')
       .get(bookingId);
     if (!bookingCreated) {
@@ -260,7 +271,7 @@ try {
     }
 
     for (const service of selected) {
-      insertBookingService.run(
+      await insertBookingService.run(
         bookingId,
         service.id,
         service.name,
@@ -270,7 +281,7 @@ try {
     }
 
     if ((status === 'completed' || status === 'in_service') && startedAt) {
-      insertServiceRecord.run(
+      await insertServiceRecord.run(
         demoUuid('service-record', i + 1),
         bookingId,
         barberId,
@@ -281,17 +292,17 @@ try {
       );
     }
 
-    const existingDaily = database.prepare(
+    const existingDaily = await database.prepare(
       'SELECT next_token_sequence FROM daily_queue_information WHERE queue_day=?',
-    ).get(dayString) as { next_token_sequence: number } | undefined;
+    ).get(dayString);
     if (!existingDaily) {
-      database.prepare(`
+      await database.prepare(`
         INSERT INTO daily_queue_information
           (queue_day,next_token_sequence,created_at,updated_at)
         VALUES (?, 6, ?, ?)
       `).run(dayString, timestamp, timestamp);
-    } else if (existingDaily.next_token_sequence <= tokenSequence) {
-      database.prepare(`
+    } else if (Number(existingDaily.next_token_sequence) <= tokenSequence) {
+      await database.prepare(`
         UPDATE daily_queue_information
         SET next_token_sequence=6,updated_at=?
         WHERE queue_day=?
@@ -299,62 +310,69 @@ try {
     }
   }
 
-  database.prepare("UPDATE reception_barbers SET status='available' WHERE id LIKE 'not-a-real-match'").run();
   for (let i = 0; i < 10; i += 1) {
     const status = i < 5 ? 'on_break' : i < 8 ? 'available' : 'available';
-    database.prepare(
+    await database.prepare(
       'UPDATE reception_barbers SET status=?,updated_at=? WHERE id=?',
     ).run(status, timestamp, barberIds[i]);
   }
   for (let i = 0; i < 5; i += 1) {
-    database.prepare(
+    await database.prepare(
       'UPDATE reception_barbers SET status=?,updated_at=? WHERE id=?',
     ).run('busy', timestamp, barberIds[5 + i]);
   }
 
-  database.exec('COMMIT');
+  });
 
-  const ownerAfter = database
+  const ownerAfter = await database
     .prepare("SELECT id,email,name FROM users WHERE role='OWNER'")
     .all();
   const ownerPreserved = JSON.stringify(ownerBefore) === JSON.stringify(ownerAfter);
 
-  const countTable = (
+  const countTable = async (
     sql: string,
     parameters: Array<string | number> = [],
-  ): number => {
-    const row = database.prepare(sql).get(...parameters) as
-      | Record<string, unknown>
-      | undefined;
+  ): Promise<number> => {
+    const row = await database.prepare(sql).get(...parameters);
     return Number(row?.['n'] ?? 0);
   };
 
   const counts = {
-    customers: countTable('SELECT COUNT(*) AS n FROM customers'),
-    barbers: countTable('SELECT COUNT(*) AS n FROM reception_barbers'),
-    barberAccounts: countTable("SELECT COUNT(*) AS n FROM users WHERE role='BARBER'"),
-    customerAccounts: countTable("SELECT COUNT(*) AS n FROM users WHERE role='CUSTOMER'"),
-    services: countTable('SELECT COUNT(*) AS n FROM salon_services'),
-    bookings: countTable('SELECT COUNT(*) AS n FROM reception_bookings'),
-    demoBookings: countTable(
+    customers: await countTable('SELECT COUNT(*) AS n FROM customers'),
+    barbers: await countTable('SELECT COUNT(*) AS n FROM reception_barbers'),
+    barberAccounts: await countTable("SELECT COUNT(*) AS n FROM users WHERE role='BARBER'"),
+    customerAccounts: await countTable("SELECT COUNT(*) AS n FROM users WHERE role='CUSTOMER'"),
+    services: await countTable('SELECT COUNT(*) AS n FROM salon_services'),
+    bookings: await countTable('SELECT COUNT(*) AS n FROM reception_bookings'),
+    demoBookings: await countTable(
       'SELECT COUNT(*) AS n FROM reception_bookings WHERE id LIKE ?',
       ['________-____-4___-8___-____________'],
     ),
-    bookingServices: countTable('SELECT COUNT(*) AS n FROM booking_services'),
-    serviceRecords: countTable('SELECT COUNT(*) AS n FROM service_records'),
-    settings: countTable('SELECT COUNT(*) AS n FROM reception_settings'),
+    bookingServices: await countTable('SELECT COUNT(*) AS n FROM booking_services'),
+    serviceRecords: await countTable('SELECT COUNT(*) AS n FROM service_records'),
+    settings: await countTable('SELECT COUNT(*) AS n FROM reception_settings'),
   };
 
-  const foreignKeyErrors = database.prepare('PRAGMA foreign_key_check').all();
-  const duplicateEmails = database.prepare(`
-    SELECT email,COUNT(*) AS n FROM users
-    GROUP BY email COLLATE NOCASE HAVING COUNT(*)>1
-  `).all();
-  const duplicateBookingIds = database.prepare(`
+  const foreignKeyErrors = await database.query(`
+    SELECT 'bookings.customer_id' AS relationship, booking.id AS row_id
+    FROM reception_bookings booking
+    LEFT JOIN customers customer ON customer.id = booking.customer_id
+    WHERE booking.customer_id IS NOT NULL AND customer.id IS NULL
+    UNION ALL
+    SELECT 'booking_services.service_id', line.booking_id
+    FROM booking_services line
+    LEFT JOIN salon_services service ON service.id = line.service_id
+    WHERE service.id IS NULL
+  `).then((result) => result.rows);
+  const duplicateEmails = await database.query(`
+    SELECT lower(email) AS email,COUNT(*) AS n FROM users
+    GROUP BY lower(email) HAVING COUNT(*)>1
+  `).then((result) => result.rows);
+  const duplicateBookingIds = await database.query(`
     SELECT id,COUNT(*) AS n FROM reception_bookings GROUP BY id HAVING COUNT(*)>1
-  `).all();
+  `).then((result) => result.rows);
 
-  const statusCounts = database.prepare(`
+  const statusCounts = await database.prepare(`
     SELECT status,COUNT(*) AS count FROM reception_bookings GROUP BY status ORDER BY status
   `).all();
 
@@ -370,12 +388,9 @@ try {
     duplicateEmails,
     duplicateBookingIds,
   }, null, 2));
-} catch (error) {
-  try {
-    database.exec('ROLLBACK');
-  } catch {
-  }
-  throw error;
 } finally {
-  database.close();
+  await database.close();
 }
+}
+
+await seedDemo();

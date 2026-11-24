@@ -1,4 +1,4 @@
-import type { DatabaseSync } from 'node:sqlite';
+import type { Database } from '../database/client.js';
 import type { RequestHandler } from 'express';
 import type { Server as SocketServer } from 'socket.io';
 import {
@@ -25,7 +25,7 @@ function writeAccessCookie(response: Parameters<RequestHandler>[1], token: strin
   response.cookie(accessCookieName, token, accessCookieOptions);
 }
 
-export function createAuthController(database: DatabaseSync, io: SocketServer) {
+export function createAuthController(database: Database, io: SocketServer) {
   const currentUser = authenticateIfPresent(database);
 
   const loginHandler: RequestHandler = async (request, response, next) => {
@@ -89,11 +89,11 @@ export function createAuthController(database: DatabaseSync, io: SocketServer) {
       if (token) {
         const user = await authenticateAccessToken(database, token);
         if (user) {
-          incrementTokenVersion(database, user.id);
+          await incrementTokenVersion(database, user.id);
           io.in(`user:${user.id}`).disconnectSockets(true);
         }
       } else if (request.authUser) {
-        incrementTokenVersion(database, request.authUser.id);
+        await incrementTokenVersion(database, request.authUser.id);
         io.in(`user:${request.authUser.id}`).disconnectSockets(true);
       }
       response.clearCookie(accessCookieName, {

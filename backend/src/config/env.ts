@@ -1,15 +1,11 @@
 import 'dotenv/config';
-import { isAbsolute, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-const backendRoot = fileURLToPath(new URL('../../', import.meta.url));
 const port = Number(process.env.PORT ?? 4000);
 
 if (!Number.isInteger(port) || port < 1 || port > 65535) {
   throw new Error('PORT must be an integer between 1 and 65535.');
 }
 
-const configuredDatabasePath = process.env.DB_PATH ?? 'data/salon.sqlite';
+const databaseUrl = process.env.DATABASE_URL;
 const businessTimeZone = process.env.BUSINESS_TIME_ZONE ?? 'Asia/Kolkata';
 const frontendOrigins = (process.env.FRONTEND_ORIGINS ??
   process.env.FRONTEND_ORIGIN ??
@@ -18,8 +14,16 @@ const frontendOrigins = (process.env.FRONTEND_ORIGINS ??
   .map((origin) => origin.trim())
   .filter(Boolean);
 
-if (!configuredDatabasePath.trim()) {
-  throw new Error('DB_PATH must be a non-empty path.');
+if (!databaseUrl?.trim()) {
+  throw new Error('DATABASE_URL must be configured with a PostgreSQL connection string.');
+}
+try {
+  const parsedDatabaseUrl = new URL(databaseUrl);
+  if (!['postgres:', 'postgresql:'].includes(parsedDatabaseUrl.protocol)) {
+    throw new Error();
+  }
+} catch {
+  throw new Error('DATABASE_URL must be a valid PostgreSQL connection string.');
 }
 if (frontendOrigins.length === 0) {
   throw new Error('FRONTEND_ORIGINS must contain at least one valid origin.');
@@ -49,7 +53,5 @@ export const config = {
   port,
   frontendOrigins,
   businessTimeZone,
-  databasePath: isAbsolute(configuredDatabasePath)
-    ? configuredDatabasePath
-    : resolve(backendRoot, configuredDatabasePath),
+  databaseUrl,
 };

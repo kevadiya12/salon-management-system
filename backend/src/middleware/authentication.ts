@@ -1,4 +1,4 @@
-import type { DatabaseSync } from 'node:sqlite';
+import type { Database } from '../database/client.js';
 import type { Request, RequestHandler } from 'express';
 import {
   authenticateAccessToken,
@@ -32,7 +32,7 @@ function requestToken(request: Request): string | null {
   return null;
 }
 
-export function authenticate(database: DatabaseSync): RequestHandler {
+export function authenticate(database: Database): RequestHandler {
   return async (request, _response, next) => {
     const token = requestToken(request);
     if (!token) {
@@ -53,7 +53,7 @@ export function authenticate(database: DatabaseSync): RequestHandler {
   };
 }
 
-export function authenticateIfPresent(database: DatabaseSync): RequestHandler {
+export function authenticateIfPresent(database: Database): RequestHandler {
   return async (request, _response, next) => {
     const token = requestToken(request);
     if (!token) {
@@ -83,8 +83,8 @@ export function authorizeRoles(...roles: UserRole[]): RequestHandler {
   };
 }
 
-export function authorizeQueueEntry(database: DatabaseSync): RequestHandler {
-  return (request, _response, next) => {
+export function authorizeQueueEntry(database: Database): RequestHandler {
+  return async (request, _response, next) => {
     const user = request.authUser;
     if (!user) {
       next(new ReceptionServiceError('Authentication is required.', 401));
@@ -100,7 +100,7 @@ export function authorizeQueueEntry(database: DatabaseSync): RequestHandler {
       return;
     }
     if (user.role === 'BARBER') {
-      const booking = database.prepare(`
+      const booking = await database.prepare(`
         SELECT assigned_barber_id
         FROM reception_bookings
         WHERE id = ?
@@ -114,7 +114,7 @@ export function authorizeQueueEntry(database: DatabaseSync): RequestHandler {
       next(new ReceptionServiceError('You are not authorized to access this queue entry.', 403));
       return;
     }
-    const booking = database.prepare(`
+    const booking = await database.prepare(`
       SELECT customer_id
       FROM reception_bookings
       WHERE id = ?
@@ -127,8 +127,8 @@ export function authorizeQueueEntry(database: DatabaseSync): RequestHandler {
   };
 }
 
-export function authorizeCustomerOrStaff(database: DatabaseSync): RequestHandler {
-  return (request, _response, next) => {
+export function authorizeCustomerOrStaff(database: Database): RequestHandler {
+  return async (request, _response, next) => {
     const user = request.authUser;
     if (!user) {
       next(new ReceptionServiceError('Authentication is required.', 401));
@@ -139,7 +139,7 @@ export function authorizeCustomerOrStaff(database: DatabaseSync): RequestHandler
       return;
     }
     if (user.role === 'CUSTOMER') {
-      const customer = database.prepare(
+      const customer = await database.prepare(
         'SELECT id FROM customers WHERE id = ?',
       ).get(singleParam(request.params['id']) ?? '') as { id: string } | undefined;
       if (customer?.id === user.customerId) {

@@ -1,5 +1,5 @@
 import type { Server } from 'socket.io';
-import type { DatabaseSync } from 'node:sqlite';
+import type { Database } from '../database/client.js';
 import { authenticateAccessToken } from '../services/auth.service.js';
 import type { AuthUser } from '../services/auth.service.js';
 
@@ -40,7 +40,7 @@ function canAccessBooking(user: AuthUser | undefined, booking: {
 
 export function registerSocketHandlers(
   io: Server,
-  database: DatabaseSync,
+  database: Database,
 ): void {
   io.use((socket, next) => {
     const token = socketAccessToken(socket.handshake.headers.cookie);
@@ -79,9 +79,9 @@ export function registerSocketHandlers(
     socket.on('queue:subscribe', () => {
       socket.join('queue:display');
     });
-    socket.on('queue:booking:subscribe', (bookingId: unknown) => {
+    socket.on('queue:booking:subscribe', async (bookingId: unknown) => {
       if (typeof bookingId !== 'string' || !uuidPattern.test(bookingId)) return;
-      const booking = database
+      const booking = await database
         .prepare(`
           SELECT customer_id, assigned_barber_id
           FROM reception_bookings
@@ -95,9 +95,9 @@ export function registerSocketHandlers(
         socket.join(`queue:booking:${bookingId}`);
       }
     });
-    socket.on('barber:subscribe', (barberId: unknown) => {
+    socket.on('barber:subscribe', async (barberId: unknown) => {
       if (typeof barberId !== 'string' || !uuidPattern.test(barberId)) return;
-      const barber = database
+      const barber = await database
         .prepare('SELECT id FROM reception_barbers WHERE id = ?')
         .get(barberId);
       if (barber) {

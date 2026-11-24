@@ -13,6 +13,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "seed:owner": "tsx src/seed-owner.ts",
     "seed:demo": "tsx src/seed-demo.ts",
+    "migrate:sqlite": "tsx src/migrate-sqlite.ts",
     "test": "tsx --test test/auth.api.test.ts test/reception.service.test.ts test/reception.api.test.ts test/socket.events.test.ts"
   },
   "dependencies": {

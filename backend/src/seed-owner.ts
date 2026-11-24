@@ -14,9 +14,9 @@ if (!name || !email || !password) {
 
 const database = createDatabase();
 try {
-  initializeReceptionSchema(database);
+  await initializeReceptionSchema(database);
   await seedInitialOwner(database, { name, email, password });
   console.info('Initial owner account created.');
 } finally {
-  database.close();
+  await database.close();
 }

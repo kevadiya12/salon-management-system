@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import { SignJWT, jwtVerify } from 'jose';
-import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
+import { Database, type DatabaseRow } from '../database/client.js';
 import { ReceptionServiceError } from './reception.service.js';
 
 export type UserRole = 'OWNER' | 'RECEPTIONIST' | 'BARBER' | 'CUSTOMER';
@@ -125,7 +125,7 @@ export function assertJwtSecretConfigured(): void {
   jwtSecret();
 }
 
-function dbText(row: Record<string, SQLOutputValue>, field: string): string {
+function dbText(row: DatabaseRow, field: string): string {
   const value = row[field];
   if (value === null || value === undefined) {
     throw new Error(`Database row is missing ${field}.`);
@@ -134,14 +134,14 @@ function dbText(row: Record<string, SQLOutputValue>, field: string): string {
 }
 
 function dbNullableText(
-  row: Record<string, SQLOutputValue>,
+  row: DatabaseRow,
   field: string,
 ): string | null {
   const value = row[field];
   return value === null || value === undefined ? null : String(value);
 }
 
-function mapAuthUser(row: Record<string, SQLOutputValue>): AuthUser {
+function mapAuthUser(row: DatabaseRow): AuthUser {
   const role = dbText(row, 'role');
   if (!['OWNER', 'RECEPTIONIST', 'BARBER', 'CUSTOMER'].includes(role)) {
     throw new Error('Database contains an unsupported user role.');
@@ -161,8 +161,8 @@ function mapAuthUser(row: Record<string, SQLOutputValue>): AuthUser {
   };
 }
 
-function findAuthUser(database: DatabaseSync, userId: string): AuthUser | null {
-  const row = database.prepare(`
+async function findAuthUser(database: Database, userId: string): Promise<AuthUser | null> {
+  const row = await database.prepare(`
     SELECT
       u.id,
       u.name,
@@ -184,7 +184,7 @@ function findAuthUser(database: DatabaseSync, userId: string): AuthUser | null {
     FROM users u
     LEFT JOIN customers c ON c.id = u.customer_id
     WHERE u.id = ? AND u.is_active = 1
-  `).get(userId) as Record<string, SQLOutputValue> | undefined;
+  `).get(userId);
   return row ? mapAuthUser(row) : null;
 }
 
@@ -198,7 +198,7 @@ export async function createAccessToken(user: AuthUser): Promise<string> {
 }
 
 export async function authenticateAccessToken(
-  database: DatabaseSync,
+  database: Database,
   token: string,
 ): Promise<AuthUser | null> {
   let subject: string;
@@ -215,25 +215,25 @@ export async function authenticateAccessToken(
     return null;
   }
   if (!subject || typeof version !== 'number') return null;
-  const user = findAuthUser(database, subject);
+  const user = await findAuthUser(database, subject);
   return user && user.tokenVersion === version
     ? { ...user, tokenExpiresAt: expiresAt ? expiresAt * 1000 : null }
     : null;
 }
 
-function checkUniqueAccountFields(
-  database: DatabaseSync,
+async function checkUniqueAccountFields(
+  database: Database,
   email: string,
   username: string | null,
-): void {
-  const existingEmail = database
-    .prepare('SELECT id FROM users WHERE email = ?')
+): Promise<void> {
+  const existingEmail = await database
+    .prepare('SELECT id FROM users WHERE lower(email) = lower(?)')
     .get(email);
   if (existingEmail) throw authError('An account with this email already exists.', 409);
 
   if (username) {
-    const existingUsername = database
-      .prepare('SELECT id FROM users WHERE username = ? COLLATE NOCASE')
+    const existingUsername = await database
+      .prepare('SELECT id FROM users WHERE lower(username) = lower(?)')
       .get(username);
     if (existingUsername) {
       throw authError('An account with this username already exists.', 409);
@@ -241,35 +241,30 @@ function checkUniqueAccountFields(
   }
 }
 
-function createCustomerAccountRecord(
-  database: DatabaseSync,
+async function createCustomerAccountRecord(
+  database: Database,
   input: Pick<NewCustomerAccount, 'name' | 'email' | 'phoneNumber'>,
   passwordHash: string,
-): string {
+): Promise<string> {
   const customerId = randomUUID();
   const userId = randomUUID();
   const now = new Date().toISOString();
-  database.exec('BEGIN IMMEDIATE');
-  try {
-    database.prepare(`
+  await database.transaction(async () => {
+    await database.prepare(`
       INSERT INTO customers (id, name, phone_number, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?)
     `).run(customerId, input.name, input.phoneNumber, now, now);
-    database.prepare(`
+    await database.prepare(`
       INSERT INTO users
         (id, name, email, password_hash, role, customer_id, is_active, created_at, updated_at)
       VALUES (?, ?, ?, ?, 'CUSTOMER', ?, 1, ?, ?)
     `).run(userId, input.name, input.email, passwordHash, customerId, now, now);
-    database.exec('COMMIT');
-    return userId;
-  } catch (error) {
-    database.exec('ROLLBACK');
-    throw error;
-  }
+  });
+  return userId;
 }
 
 export async function registerCustomer(
-  database: DatabaseSync,
+  database: Database,
   rawInput: unknown,
 ): Promise<AuthUser> {
   const input = inputObject(rawInput);
@@ -281,35 +276,33 @@ export async function registerCustomer(
     throw authError('Enter a valid 10-digit phone number.', 400);
   }
   const password = validatedPassword(input['password']);
-  checkUniqueAccountFields(database, email, null);
+  await checkUniqueAccountFields(database, email, null);
   const passwordHash = await bcrypt.hash(password, bcryptCost);
-  const userId = createCustomerAccountRecord(
+  const userId = await createCustomerAccountRecord(
     database,
     { name, email, phoneNumber },
     passwordHash,
   );
-  const user = findAuthUser(database, userId);
+  const user = await findAuthUser(database, userId);
   if (!user) throw new Error('New customer account could not be loaded.');
   return user;
 }
 
 export async function login(
-  database: DatabaseSync,
+  database: Database,
   rawInput: unknown,
 ): Promise<AuthUser | null> {
   const input = inputObject(rawInput);
   const identifier = requiredText(input['identifier'], 'Email or username', 254);
   const password =
     typeof input['password'] === 'string' ? input['password'] : '';
-  const row = database.prepare(`
+  const row = await database.prepare(`
     SELECT id, password_hash
     FROM users
     WHERE is_active = 1
-      AND (email = ? COLLATE NOCASE OR username = ? COLLATE NOCASE)
+      AND (lower(email) = lower(?) OR lower(username) = lower(?))
     LIMIT 1
-  `).get(identifier, identifier) as
-    | Record<string, SQLOutputValue>
-    | undefined;
+  `).get(identifier, identifier);
   const matches = row
     ? await bcrypt.compare(password, dbText(row, 'password_hash'))
     : false;
@@ -318,29 +311,29 @@ export async function login(
 }
 
 export async function seedInitialOwner(
-  database: DatabaseSync,
+  database: Database,
   rawInput: { name: unknown; email: unknown; password: unknown },
 ): Promise<void> {
   const name = requiredText(rawInput.name, 'Owner name', 100);
   const email = normalizedEmail(rawInput.email);
   const password = validatedPassword(rawInput.password);
-  const ownerExists = database
+  const ownerExists = await database
     .prepare("SELECT id FROM users WHERE role = 'OWNER' LIMIT 1")
     .get();
   if (ownerExists) {
     throw authError('An owner account already exists; no account was created.', 409);
   }
-  checkUniqueAccountFields(database, email, null);
+  await checkUniqueAccountFields(database, email, null);
   const passwordHash = await bcrypt.hash(password, bcryptCost);
   const now = new Date().toISOString();
-  database.prepare(`
+  await database.prepare(`
     INSERT INTO users
       (id, name, email, password_hash, role, is_active, created_at, updated_at)
     VALUES (?, ?, ?, ?, 'OWNER', 1, ?, ?)
   `).run(randomUUID(), name, email, passwordHash, now, now);
 }
 
-function mapStaffAccount(row: Record<string, SQLOutputValue>): StaffAccount {
+function mapStaffAccount(row: DatabaseRow): StaffAccount {
   const role = dbText(row, 'role');
   if (role !== 'RECEPTIONIST' && role !== 'BARBER') {
     throw new Error('Staff account query returned a non-staff role.');
@@ -364,13 +357,13 @@ const staffSelect = `
   WHERE role IN ('RECEPTIONIST', 'BARBER')
 `;
 
-export function listStaffAccounts(database: DatabaseSync): StaffAccount[] {
-  return (database.prepare(`${staffSelect} ORDER BY created_at DESC`).all() as
-    Record<string, SQLOutputValue>[]).map(mapStaffAccount);
+export async function listStaffAccounts(database: Database): Promise<StaffAccount[]> {
+  return (await database.prepare(`${staffSelect} ORDER BY created_at DESC`).all())
+    .map(mapStaffAccount);
 }
 
 export async function createStaffAccount(
-  database: DatabaseSync,
+  database: Database,
   rawInput: unknown,
 ): Promise<StaffAccount> {
   const input = inputObject(rawInput);
@@ -394,32 +387,32 @@ export async function createStaffAccount(
     throw authError('A barber account must be linked to one barber profile.', 400);
   }
   if (barberId) {
-    const barber = database
+    const barber = await database
       .prepare('SELECT id FROM reception_barbers WHERE id = ? AND is_active = 1')
       .get(barberId);
     if (!barber) throw authError('The selected barber is not active.', 404);
-    if (database.prepare('SELECT id FROM users WHERE barber_id = ?').get(barberId)) {
+    if (await database.prepare('SELECT id FROM users WHERE barber_id = ?').get(barberId)) {
       throw authError('This barber already has an account.', 409);
     }
   }
-  checkUniqueAccountFields(database, email, username);
+  await checkUniqueAccountFields(database, email, username);
   const passwordHash = await bcrypt.hash(password, bcryptCost);
   const now = new Date().toISOString();
   const userId = randomUUID();
-  database.prepare(`
+  await database.prepare(`
     INSERT INTO users
       (id, name, email, username, password_hash, role, barber_id, is_active, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
   `).run(userId, name, email, username, passwordHash, role, barberId, now, now);
-  const row = database
+  const row = await database
     .prepare(`${staffSelect} AND id = ?`)
-    .get(userId) as Record<string, SQLOutputValue> | undefined;
+    .get(userId);
   if (!row) throw new Error('New staff account could not be loaded.');
   return mapStaffAccount(row);
 }
 
 export async function updateStaffAccount(
-  database: DatabaseSync,
+  database: Database,
   userId: string,
   rawInput: unknown,
 ): Promise<StaffAccount> {
@@ -427,9 +420,9 @@ export async function updateStaffAccount(
   if (input['role'] !== undefined || input['barberId'] !== undefined) {
     throw authError('Staff roles and barber assignments cannot be changed here.', 400);
   }
-  const current = database
+  const current = await database
     .prepare(`${staffSelect} AND id = ?`)
-    .get(userId) as Record<string, SQLOutputValue> | undefined;
+    .get(userId);
   if (!current) throw authError('Staff account not found.', 404);
 
   const updates: string[] = [];
@@ -441,8 +434,8 @@ export async function updateStaffAccount(
   }
   if (input['email'] !== undefined) {
     const email = normalizedEmail(input['email']);
-    const duplicate = database
-      .prepare('SELECT id FROM users WHERE email = ? AND id != ?')
+    const duplicate = await database
+      .prepare('SELECT id FROM users WHERE lower(email) = lower(?) AND id != ?')
       .get(email, userId);
     if (duplicate) throw authError('An account with this email already exists.', 409);
     updates.push('email = ?');
@@ -468,19 +461,19 @@ export async function updateStaffAccount(
   }
   updates.push('updated_at = ?');
   values.push(new Date().toISOString(), userId);
-  database.prepare(`
+  await database.prepare(`
     UPDATE users SET ${updates.join(', ')}
     WHERE id = ? AND role IN ('RECEPTIONIST', 'BARBER')
   `).run(...values);
-  const row = database
+  const row = await database
     .prepare(`${staffSelect} AND id = ?`)
-    .get(userId) as Record<string, SQLOutputValue> | undefined;
+    .get(userId);
   if (!row) throw new Error('Updated staff account could not be loaded.');
   return mapStaffAccount(row);
 }
 
-export function incrementTokenVersion(database: DatabaseSync, userId: string): void {
-  database.prepare(`
+export async function incrementTokenVersion(database: Database, userId: string): Promise<void> {
+  await database.prepare(`
     UPDATE users SET token_version = token_version + 1, updated_at = ?
     WHERE id = ?
   `).run(new Date().toISOString(), userId);

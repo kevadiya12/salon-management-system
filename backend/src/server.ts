@@ -23,7 +23,7 @@ const frontendIndexPath = resolve(frontendDistPath, 'index.html');
 
 assertJwtSecretConfigured();
 const database = createDatabase();
-initializeReceptionSchema(database);
+await initializeReceptionSchema(database);
 const app = express();
 
 const isAllowedOrigin = (

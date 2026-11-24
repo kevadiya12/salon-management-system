@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import type { DatabaseSync } from 'node:sqlite';
+import type { Database } from '../database/client.js';
 import type { Server as SocketServer } from 'socket.io';
 import { createReceptionController } from '../controllers/reception.controller.js';
 import {
@@ -10,7 +10,7 @@ import {
 } from '../middleware/authentication.js';
 
 export function createReceptionRouter(
-  database: DatabaseSync,
+  database: Database,
   io: SocketServer,
 ): Router {
   const router = Router();

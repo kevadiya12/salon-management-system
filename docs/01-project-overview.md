@@ -6,7 +6,7 @@ The Salon Queue Management System is a web application for joining and operating
 
 - Frontend: React 19, TypeScript, Vite, React Router, Tailwind CSS, Socket.IO client.
 - Backend: Node.js 22.13+, TypeScript, Express 5, Socket.IO 4.
-- Persistence: SQLite through Node's built-in `node:sqlite` module.
+- Persistence: Neon PostgreSQL through the `pg` connection pool.
 - Authentication: JWT access tokens in HttpOnly cookies and bcryptjs password hashes.
 
 ## Application routes

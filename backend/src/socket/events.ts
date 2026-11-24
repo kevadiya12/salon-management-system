@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { DatabaseSync } from 'node:sqlite';
+import type { Database } from '../database/client.js';
 import { getQueueEntryStatus } from '../services/reception.service.js';
 import type { BarberStatus, BookingStatus } from '../types/reception.js';
 
@@ -34,8 +34,8 @@ export interface SalonSocketEmitter {
   };
 }
 
-export function emitSalonEvent(
-  database: DatabaseSync,
+export async function emitSalonEvent(
+  database: Database,
   io: SalonSocketEmitter,
   event: SalonEvent,
   options: {
@@ -43,14 +43,14 @@ export function emitSalonEvent(
     barberId?: string;
     queueOpen?: boolean;
   } = {},
-): SalonEventPayload {
+): Promise<SalonEventPayload> {
   const entry = options.bookingId
-    ? getQueueEntryStatus(database, options.bookingId)
+    ? await getQueueEntryStatus(database, options.bookingId)
     : null;
   const barberStatus = options.barberId
-    ? database
+    ? (await database
         .prepare('SELECT status FROM reception_barbers WHERE id = ?')
-        .get(options.barberId)?.['status']
+        .get(options.barberId))?.['status']
     : null;
   const payload: SalonEventPayload = {
     eventId: randomUUID(),

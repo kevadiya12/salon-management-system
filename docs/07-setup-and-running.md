@@ -2,8 +2,9 @@
 
 ## Requirements
 
-- Node.js 22.13 or newer (`node:sqlite` is used directly).
+- Node.js 22.13 or newer.
 - npm.
+- A Neon PostgreSQL database.
 
 ## Install and run
 
@@ -14,6 +15,8 @@ cd backend
 Copy-Item .env.example .env
 npm install
 ```
+
+Set `DATABASE_URL` to the Neon connection string before starting. Use the pooled connection endpoint (the Neon hostname normally includes `-pooler`) and keep `sslmode=require`. Set `JWT_SECRET` to a cryptographically random value of at least 32 bytes; never commit either value.
 
 Set `JWT_SECRET` in `backend/.env` to a cryptographically random value of at least 32 bytes before starting the API. Example PowerShell commands (the generated value is written only to the ignored local `.env` file):
 
@@ -64,9 +67,14 @@ The frontend is available at <http://localhost:5173>. The backend defaults to po
 | `PORT` | `4000` | HTTP and Socket.IO server port. Must be between 1 and 65535. |
 | `FRONTEND_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | Comma-separated allowed HTTP(S) origins. |
 | `FRONTEND_ORIGIN` | unset | Legacy single-origin fallback if `FRONTEND_ORIGINS` is unset. |
-| `DB_PATH` | `data/salon.sqlite` | SQLite file path; relative paths resolve from the backend directory. |
+| `DATABASE_URL` | Required | Neon PostgreSQL connection URI, preferably the pooled endpoint and with TLS required (`sslmode=require`). |
 | `BUSINESS_TIME_ZONE` | `Asia/Kolkata` | IANA timezone used for business-day token sequences and daily counts. |
 | `JWT_SECRET` | Required | Secret key for signing JWT access tokens; configure a random value of at least 32 bytes and keep it private. |
+| `NODE_ENV` | unset | Set to `production` in deployment; controls secure authentication-cookie behavior. |
+
+The initial owner seed also requires `INITIAL_OWNER_NAME`, `INITIAL_OWNER_EMAIL`, and `INITIAL_OWNER_PASSWORD` for the duration of `npm run seed:owner`. The password must contain at least 12 characters. These are one-time seed inputs, not runtime database settings.
+
+To copy an existing SQLite installation into an empty Neon database, first configure `DATABASE_URL`, then set `SQLITE_SOURCE` to the path of the existing SQLite file and run `npm run migrate:sqlite`. This one-time import refuses to run when the target already contains user, customer, barber, or booking data. Back up both databases first and verify the imported records before directing production traffic.
 
 ## Frontend environment
 
@@ -99,7 +107,7 @@ Build command: npm run build --prefix backend && npm run build --prefix frontend
 Start command: npm start --prefix backend
 ```
 
-Set the existing `JWT_SECRET` in Render. The service's own origin is allowed automatically; `FRONTEND_ORIGINS` continues to allow additional origins, with localhost defaults for development. Leave `VITE_SOCKET_URL` unset so the frontend uses same-origin `/api` requests and `/socket.io` connections. Attach persistent storage for SQLite and set the existing `DB_PATH` to a database file on that storage; otherwise the database may be lost when the service is replaced.
+Set `DATABASE_URL` to the Neon pooled connection string and set a private `JWT_SECRET` in Render. Also configure `BUSINESS_TIME_ZONE` if the salon is outside `Asia/Kolkata`, `NODE_ENV=production`, and any additional allowed `FRONTEND_ORIGINS`. The service's own origin is allowed automatically. Leave `VITE_SOCKET_URL` unset so the frontend uses same-origin `/api` requests and `/socket.io` connections. SQLite persistent storage is no longer used.
 
 ## Other scripts
 

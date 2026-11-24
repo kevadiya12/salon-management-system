@@ -1,6 +1,6 @@
 # Database Schema
 
-The schema is created and migrated by `backend/src/database/reception-schema.ts`. SQLite foreign-key enforcement is enabled. Timestamps are stored as text, generally ISO-8601 strings. The database is opened in WAL mode.
+The schema is created and migrated by `backend/src/database/reception-schema.ts`. PostgreSQL foreign keys and check constraints enforce relationships and valid values. Timestamps are stored as text, generally ISO-8601 strings, to preserve the existing API representation.
 
 ## Tables
 
@@ -30,7 +30,7 @@ The schema is created and migrated by `backend/src/database/reception-schema.ts`
 
 ## Initialization and migration
 
-Startup creates missing tables, indexes, and timestamp triggers, adds supported columns to older databases, and migrates legacy booking customer/service data in a transaction. The built-in `Haircut`, `Beard Trim`, and `Hair Spa` rows are inserted if absent. Existing records are not replaced with sample queue data. The initial owner account is created separately by `npm run seed:owner`.
+Startup creates missing tables and indexes, adds supported columns to older PostgreSQL schemas, and migrates legacy booking customer/service data in a transaction. The built-in `Haircut`, `Beard Trim`, and `Hair Spa` rows are inserted if absent. Existing records are not replaced with sample queue data. The initial owner account is created separately by `npm run seed:owner`.
 
 ## Not persisted
 

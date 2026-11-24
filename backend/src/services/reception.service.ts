@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
+import { Database, type DatabaseRow } from '../database/client.js';
 import { config } from '../config/env.js';
 import {
   type BarberDashboard,
@@ -48,7 +48,7 @@ function inputRecord(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-function rowText(row: Record<string, SQLOutputValue>, column: string): string {
+function rowText(row: DatabaseRow, column: string): string {
   const value = row[column];
   if (value === null || value === undefined) {
     throw new Error(`Database row is missing ${column}.`);
@@ -57,14 +57,14 @@ function rowText(row: Record<string, SQLOutputValue>, column: string): string {
 }
 
 function nullableRowText(
-  row: Record<string, SQLOutputValue>,
+  row: DatabaseRow,
   column: string,
 ): string | null {
   const value = row[column];
   return value === null || value === undefined ? null : String(value);
 }
 
-function numberValue(value: SQLOutputValue | undefined): number {
+function numberValue(value: unknown): number {
   return Number(value ?? 0);
 }
 
@@ -121,26 +121,21 @@ function startOfBusinessDay(
   return new Date(candidate);
 }
 
-function inTransaction<T>(database: DatabaseSync, action: () => T): T {
-  database.exec('BEGIN IMMEDIATE');
-  try {
-    const result = action();
-    database.exec('COMMIT');
-    return result;
-  } catch (error) {
-    database.exec('ROLLBACK');
-    throw error;
-  }
+function inTransaction<T>(
+  database: Database,
+  action: () => Promise<T>,
+): Promise<T> {
+  return database.transaction(action);
 }
 
-function requireBarber(
-  database: DatabaseSync,
+async function requireBarber(
+  database: Database,
   barberId: string,
-): Record<string, SQLOutputValue> {
+): Promise<DatabaseRow> {
   if (!uuidPattern.test(barberId)) {
     throw new ReceptionServiceError('Invalid barber ID.', 400);
   }
-  const barber = database
+  const barber = await database
     .prepare(
       'SELECT id, name, photo_url, status, is_active FROM reception_barbers WHERE id = ?',
     )
@@ -153,11 +148,11 @@ function requireBarber(
   return barber;
 }
 
-function getServiceDetails(
-  database: DatabaseSync,
+async function getServiceDetails(
+  database: Database,
   serviceIds: string[],
   activeOnly = true,
-): {
+): Promise<{
   ids: ReceptionServiceId[];
   names: string[];
   durationMinutes: number;
@@ -168,7 +163,7 @@ function getServiceDetails(
     durationMinutes: number;
     priceRupees: number;
   }>;
-} {
+}> {
   if (!Array.isArray(serviceIds) || serviceIds.length === 0) {
     throw new ReceptionServiceError('Select at least one service.', 400);
   }
@@ -184,8 +179,8 @@ function getServiceDetails(
      FROM salon_services
      WHERE id = ?`,
   );
-  const selected = serviceIds.map((id) => {
-    const service = selectService.get(id);
+  const selected = await Promise.all(serviceIds.map(async (id) => {
+    const service = await selectService.get(id);
     if (!service || (activeOnly && numberValue(service['is_active']) !== 1)) {
       throw new ReceptionServiceError('One or more selected services are invalid or inactive.', 400);
     }
@@ -195,7 +190,7 @@ function getServiceDetails(
       durationMinutes: numberValue(service['duration_minutes']),
       priceRupees: numberValue(service['price_rupees']),
     };
-  });
+  }));
 
   return {
     ids: selected.map((service) => service.id),
@@ -212,26 +207,32 @@ function getServiceDetails(
   };
 }
 
-function getBookingServiceDetails(
-  database: DatabaseSync,
+async function getBookingServiceDetails(
+  database: Database,
   bookingId: string,
   serviceIds: string[],
 ): ReturnType<typeof getServiceDetails> {
-  const snapshots = database
+  const snapshots = await database
     .prepare(
       `SELECT service_id, service_name, duration_minutes, price_rupees
        FROM booking_services
        WHERE booking_id = ?
-       ORDER BY rowid`,
+       ORDER BY service_id`,
     )
     .all(bookingId);
   if (snapshots.length) {
-    const services = snapshots.map((row) => ({
+    const servicesById = new Map(
+      snapshots.map((row) => [rowText(row, 'service_id'), row]),
+    );
+    const services = serviceIds
+      .map((serviceId) => servicesById.get(serviceId))
+      .filter((row): row is DatabaseRow => row !== undefined)
+      .map((row) => ({
       id: rowText(row, 'service_id'),
       name: rowText(row, 'service_name'),
       durationMinutes: numberValue(row['duration_minutes']),
       priceRupees: numberValue(row['price_rupees']),
-    }));
+      }));
     return {
       ids: services.map((service) => service.id),
       names: services.map((service) => service.name),
@@ -244,7 +245,7 @@ function getBookingServiceDetails(
 }
 
 function mapSalonService(
-  row: Record<string, SQLOutputValue>,
+  row: DatabaseRow,
 ): SalonServiceRecord {
   return {
     id: rowText(row, 'id'),
@@ -257,7 +258,7 @@ function mapSalonService(
 }
 
 function mapCustomer(
-  row: Record<string, SQLOutputValue>,
+  row: DatabaseRow,
 ): CustomerRecord {
   return {
     id: rowText(row, 'id'),
@@ -278,61 +279,61 @@ function validatePhoneNumber(value: unknown): string {
   return value;
 }
 
-export function createCustomer(
-  database: DatabaseSync,
+export async function createCustomer(
+  database: Database,
   input: unknown,
   now = new Date(),
-): CustomerRecord {
+): Promise<CustomerRecord> {
   const values = inputRecord(input);
   const name = requiredText(values['name'], 'Customer name', 100);
   const phoneNumber = validatePhoneNumber(values['phoneNumber']);
   const id = randomUUID();
   const timestamp = now.toISOString();
 
-  database
+  await database
     .prepare(
       `INSERT INTO customers (id, name, phone_number, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?)`,
     )
     .run(id, name, phoneNumber, timestamp, timestamp);
 
-  const customer = database
+  const customer = await database
     .prepare('SELECT * FROM customers WHERE id = ?')
     .get(id);
   if (!customer) throw new Error('Created customer could not be loaded.');
   return mapCustomer(customer);
 }
 
-export function getCustomer(
-  database: DatabaseSync,
+export async function getCustomer(
+  database: Database,
   customerId: string,
-): CustomerRecord {
+): Promise<CustomerRecord> {
   if (!uuidPattern.test(customerId)) {
     throw new ReceptionServiceError('Invalid customer ID.', 400);
   }
-  const customer = database
+  const customer = await database
     .prepare('SELECT * FROM customers WHERE id = ?')
     .get(customerId);
   if (!customer) throw new ReceptionServiceError('Customer not found.', 404);
   return mapCustomer(customer);
 }
 
-export function listSalonServices(
-  database: DatabaseSync,
+export async function listSalonServices(
+  database: Database,
   includeInactive = false,
-): SalonServiceRecord[] {
+): Promise<SalonServiceRecord[]> {
   const query = includeInactive
     ? 'SELECT * FROM salon_services ORDER BY name, id'
     : 'SELECT * FROM salon_services WHERE is_active = 1 ORDER BY name, id';
-  return database.prepare(query).all().map(mapSalonService);
+  return (await database.prepare(query).all()).map(mapSalonService);
 }
 
-export function getSalonService(
-  database: DatabaseSync,
+export async function getSalonService(
+  database: Database,
   serviceId: string,
   includeInactive = false,
-): SalonServiceRecord {
-  const service = database
+): Promise<SalonServiceRecord> {
+  const service = await database
     .prepare(
       `SELECT * FROM salon_services
        WHERE id = ? AND (? = 1 OR is_active = 1)`,
@@ -396,20 +397,20 @@ function validateServiceInput(
   return { name, description, durationMinutes, priceRupees, isActive };
 }
 
-export function createSalonService(
-  database: DatabaseSync,
+export async function createSalonService(
+  database: Database,
   input: unknown,
   now = new Date(),
-): SalonServiceRecord {
+): Promise<SalonServiceRecord> {
   const values = validateServiceInput(inputRecord(input));
-  const duplicate = database
+  const duplicate = await database
     .prepare('SELECT id FROM salon_services WHERE lower(name) = lower(?)')
     .get(values.name);
   if (duplicate) throw new ReceptionServiceError('A service with this name already exists.', 409);
 
   const id = randomUUID();
   const timestamp = now.toISOString();
-  database
+  await database
     .prepare(
       `INSERT INTO salon_services
          (id, name, description, duration_minutes, price_rupees, is_active, created_at, updated_at)
@@ -428,21 +429,21 @@ export function createSalonService(
   return getSalonService(database, id, true);
 }
 
-export function updateSalonService(
-  database: DatabaseSync,
+export async function updateSalonService(
+  database: Database,
   serviceId: string,
   input: unknown,
-): SalonServiceRecord {
-  const current = getSalonService(database, serviceId, true);
+): Promise<SalonServiceRecord> {
+  const current = await getSalonService(database, serviceId, true);
   const values = validateServiceInput(inputRecord(input), current);
-  const duplicate = database
+  const duplicate = await database
     .prepare(
       'SELECT id FROM salon_services WHERE lower(name) = lower(?) AND id != ?',
     )
     .get(values.name, serviceId);
   if (duplicate) throw new ReceptionServiceError('A service with this name already exists.', 409);
 
-  database
+  await database
     .prepare(
       `UPDATE salon_services
        SET name = ?, description = ?, duration_minutes = ?, price_rupees = ?,
@@ -461,8 +462,8 @@ export function updateSalonService(
   return getSalonService(database, serviceId, true);
 }
 
-function isQueueOpen(database: DatabaseSync): boolean {
-  const setting = database
+async function isQueueOpen(database: Database): Promise<boolean> {
+  const setting = await database
     .prepare(
       "SELECT setting_value FROM reception_settings WHERE setting_key = 'queue_open'",
     )
@@ -470,13 +471,13 @@ function isQueueOpen(database: DatabaseSync): boolean {
   return setting?.['setting_value'] === '1';
 }
 
-function mapBooking(
-  database: DatabaseSync,
-  row: Record<string, SQLOutputValue>,
+async function mapBooking(
+  database: Database,
+  row: DatabaseRow,
   now: Date,
-): ReceptionBooking {
+): Promise<ReceptionBooking> {
   const serviceIds = JSON.parse(rowText(row, 'service_ids')) as string[];
-  const services = getBookingServiceDetails(
+  const services = await getBookingServiceDetails(
     database,
     rowText(row, 'id'),
     serviceIds,
@@ -508,13 +509,13 @@ function mapBooking(
   };
 }
 
-function mapBarber(
-  database: DatabaseSync,
-  row: Record<string, SQLOutputValue>,
+async function mapBarber(
+  database: Database,
+  row: DatabaseRow,
   now: Date,
-): ReceptionBarber {
+): Promise<ReceptionBarber> {
   const id = rowText(row, 'id');
-  const current = database
+  const current = await database
     .prepare(
       `SELECT id, customer_name, service_ids, status, service_started_at,
               duration_minutes
@@ -542,7 +543,7 @@ function mapBarber(
     };
   }
 
-  const services = getBookingServiceDetails(
+  const services = await getBookingServiceDetails(
     database,
     rowText(current, 'id'),
     JSON.parse(rowText(current, 'service_ids')) as string[],
@@ -574,11 +575,11 @@ function mapBarber(
   };
 }
 
-export function createBarber(
-  database: DatabaseSync,
+export async function createBarber(
+  database: Database,
   input: unknown,
   now = new Date(),
-): BarberRecord {
+): Promise<BarberRecord> {
   const values = inputRecord(input);
   const name = requiredText(values['name'], 'Barber name', 100);
   const photoUrl =
@@ -593,7 +594,7 @@ export function createBarber(
 
   const id = randomUUID();
   const timestamp = now.toISOString();
-  database
+  await database
     .prepare(
       `INSERT INTO reception_barbers
          (id, name, photo_url, status, created_at, updated_at)
@@ -614,14 +615,14 @@ export interface BarberRecord {
   updatedAt: string;
 }
 
-export function getBarberRecord(
-  database: DatabaseSync,
+export async function getBarberRecord(
+  database: Database,
   barberId: string,
-): BarberRecord {
+): Promise<BarberRecord> {
   if (!uuidPattern.test(barberId)) {
     throw new ReceptionServiceError('Invalid barber ID.', 400);
   }
-  const row = database
+  const row = await database
     .prepare(
       `SELECT id, name, photo_url, status, is_active, created_at, updated_at
        FROM reception_barbers
@@ -640,18 +641,18 @@ export function getBarberRecord(
   };
 }
 
-export function listBarberRecords(
-  database: DatabaseSync,
+export async function listBarberRecords(
+  database: Database,
   includeInactive = false,
-): BarberRecord[] {
-  return database
+): Promise<BarberRecord[]> {
+  return (await database
     .prepare(
       `SELECT id, name, photo_url, status, is_active, created_at, updated_at
        FROM reception_barbers
        WHERE (? = 1 OR is_active = 1)
        ORDER BY created_at, id`,
     )
-    .all(includeInactive ? 1 : 0)
+    .all(includeInactive ? 1 : 0))
     .map((row) => ({
       id: rowText(row, 'id'),
       name: rowText(row, 'name'),
@@ -663,13 +664,13 @@ export function listBarberRecords(
     }));
 }
 
-export function updateBarberProfile(
-  database: DatabaseSync,
+export async function updateBarberProfile(
+  database: Database,
   barberId: string,
   input: unknown,
-): BarberRecord {
+): Promise<BarberRecord> {
   const values = inputRecord(input);
-  const current = getBarberRecord(database, barberId);
+  const current = await getBarberRecord(database, barberId);
   const name =
     values['name'] === undefined
       ? current.name
@@ -690,7 +691,7 @@ export function updateBarberProfile(
     throw new ReceptionServiceError('Barber active status must be true or false.', 400);
   }
   if (!isActive && current.isActive) {
-    const activeBooking = database
+    const activeBooking = await database
       .prepare(
         `SELECT id FROM reception_bookings
          WHERE assigned_barber_id = ? AND status IN ('called', 'in_service')
@@ -705,7 +706,7 @@ export function updateBarberProfile(
     }
   }
 
-  database
+  await database
     .prepare(
       `UPDATE reception_barbers
        SET name = ?, photo_url = ?, is_active = ?, updated_at = ?
@@ -715,11 +716,11 @@ export function updateBarberProfile(
   return getBarberRecord(database, barberId);
 }
 
-export function updateBarberStatus(
-  database: DatabaseSync,
+export async function updateBarberStatus(
+  database: Database,
   barberId: string,
   requestedStatus: unknown,
-): BarberRecord {
+): Promise<BarberRecord> {
   if (
     requestedStatus !== 'available' &&
     requestedStatus !== 'busy' &&
@@ -732,16 +733,16 @@ export function updateBarberStatus(
   }
 
   if (requestedStatus !== 'busy') {
-    setBarberAvailability(database, barberId, requestedStatus);
+    await setBarberAvailability(database, barberId, requestedStatus);
     return getBarberRecord(database, barberId);
   }
 
-  inTransaction(database, () => {
-    const barber = requireBarber(database, barberId);
+  await inTransaction(database, async () => {
+    const barber = await requireBarber(database, barberId);
     if (numberValue(barber['is_active']) !== 1) {
       throw new ReceptionServiceError('An inactive barber cannot be marked Busy.', 409);
     }
-    const activeBooking = database
+    const activeBooking = await database
       .prepare(
         `SELECT id FROM reception_bookings
          WHERE assigned_barber_id = ? AND status IN ('called', 'in_service')
@@ -754,18 +755,18 @@ export function updateBarberStatus(
         409,
       );
     }
-    database
+    await database
       .prepare("UPDATE reception_barbers SET status = 'busy' WHERE id = ?")
       .run(barberId);
   });
   return getBarberRecord(database, barberId);
 }
 
-export function setBarberAvailability(
-  database: DatabaseSync,
+export async function setBarberAvailability(
+  database: Database,
   barberId: string,
   requestedStatus: unknown,
-): void {
+): Promise<void> {
   if (requestedStatus !== 'available' && requestedStatus !== 'on_break') {
     throw new ReceptionServiceError(
       'Barber status can only be changed to Available or On Break.',
@@ -773,15 +774,15 @@ export function setBarberAvailability(
     );
   }
 
-  inTransaction(database, () => {
-    const barber = requireBarber(database, barberId);
+  await inTransaction(database, async () => {
+    const barber = await requireBarber(database, barberId);
     if (numberValue(barber['is_active']) !== 1) {
       throw new ReceptionServiceError('An inactive barber cannot call the queue.', 409);
     }
     if (numberValue(barber['is_active']) !== 1) {
       throw new ReceptionServiceError('An inactive barber cannot change availability.', 409);
     }
-    const activeBooking = database
+    const activeBooking = await database
       .prepare(
         `SELECT id FROM reception_bookings
          WHERE assigned_barber_id = ? AND status IN ('called', 'in_service')
@@ -803,7 +804,7 @@ export function setBarberAvailability(
       );
     }
 
-    database
+    await database
       .prepare('UPDATE reception_barbers SET status = ? WHERE id = ?')
       .run(requestedStatus, barberId);
   });
@@ -820,16 +821,16 @@ export interface OwnerSettings {
   maxQueueCapacity: number | null;
 }
 
-function getSetting(database: DatabaseSync, key: string): string | null {
-  const row = database
+async function getSetting(database: Database, key: string): Promise<string | null> {
+  const row = await database
     .prepare('SELECT setting_value FROM reception_settings WHERE setting_key = ?')
     .get(key);
   return row ? rowText(row, 'setting_value') : null;
 }
 
-function saveSetting(database: DatabaseSync, key: string, value: string): void {
+async function saveSetting(database: Database, key: string, value: string): Promise<void> {
   const now = new Date().toISOString();
-  database
+  await database
     .prepare(
       `INSERT INTO reception_settings (setting_key, setting_value, created_at, updated_at)
        VALUES (?, ?, ?, ?)
@@ -840,28 +841,45 @@ function saveSetting(database: DatabaseSync, key: string, value: string): void {
     .run(key, value, now, now);
 }
 
-export function getOwnerSettings(database: DatabaseSync): OwnerSettings {
-  const maxCapacity = getSetting(database, 'queue_max_capacity');
-  const workingDays = getSetting(database, 'business_working_days');
+export async function getOwnerSettings(database: Database): Promise<OwnerSettings> {
+  const [
+    maxCapacity,
+    workingDays,
+    salonName,
+    address,
+    contactNumber,
+    openingTime,
+    closingTime,
+    queueOpen,
+  ] = await Promise.all([
+    getSetting(database, 'queue_max_capacity'),
+    getSetting(database, 'business_working_days'),
+    getSetting(database, 'salon_name'),
+    getSetting(database, 'salon_address'),
+    getSetting(database, 'salon_contact_number'),
+    getSetting(database, 'business_opening_time'),
+    getSetting(database, 'business_closing_time'),
+    isQueueOpen(database),
+  ]);
   return {
-    salonName: getSetting(database, 'salon_name') ?? 'Salon',
-    address: getSetting(database, 'salon_address') ?? '',
-    contactNumber: getSetting(database, 'salon_contact_number') ?? '',
-    openingTime: getSetting(database, 'business_opening_time') ?? '',
-    closingTime: getSetting(database, 'business_closing_time') ?? '',
+    salonName: salonName ?? 'Salon',
+    address: address ?? '',
+    contactNumber: contactNumber ?? '',
+    openingTime: openingTime ?? '',
+    closingTime: closingTime ?? '',
     workingDays: workingDays ? (JSON.parse(workingDays) as number[]) : [],
-    queueOpen: isQueueOpen(database),
+    queueOpen,
     maxQueueCapacity:
       maxCapacity === null || maxCapacity === '' ? null : Number(maxCapacity),
   };
 }
 
-export function updateOwnerSettings(
-  database: DatabaseSync,
+export async function updateOwnerSettings(
+  database: Database,
   input: unknown,
-): OwnerSettings {
+): Promise<OwnerSettings> {
   const values = inputRecord(input);
-  const current = getOwnerSettings(database);
+  const current = await getOwnerSettings(database);
   const salonName =
     values['salonName'] === undefined
       ? current.salonName
@@ -939,26 +957,26 @@ export function updateOwnerSettings(
     throw new ReceptionServiceError('Salon status must be Open or Closed.', 400);
   }
 
-  saveSetting(database, 'salon_name', salonName);
-  saveSetting(database, 'salon_address', address);
-  saveSetting(database, 'salon_contact_number', contactNumber);
-  saveSetting(database, 'business_opening_time', openingTime);
-  saveSetting(database, 'business_closing_time', closingTime);
-  saveSetting(database, 'business_working_days', JSON.stringify(workingDays));
-  saveSetting(
+  await saveSetting(database, 'salon_name', salonName);
+  await saveSetting(database, 'salon_address', address);
+  await saveSetting(database, 'salon_contact_number', contactNumber);
+  await saveSetting(database, 'business_opening_time', openingTime);
+  await saveSetting(database, 'business_closing_time', closingTime);
+  await saveSetting(database, 'business_working_days', JSON.stringify(workingDays));
+  await saveSetting(
     database,
     'queue_max_capacity',
     maxQueueCapacity === null ? '' : String(maxQueueCapacity),
   );
-  setQueueOpen(database, queueOpen);
+  await setQueueOpen(database, queueOpen);
   return getOwnerSettings(database);
 }
 
-export function setQueueOpen(database: DatabaseSync, open: unknown): void {
+export async function setQueueOpen(database: Database, open: unknown): Promise<void> {
   if (typeof open !== 'boolean') {
     throw new ReceptionServiceError('Queue state must be true or false.', 400);
   }
-  database
+  await database
     .prepare(
       `UPDATE reception_settings
        SET setting_value = ?
@@ -975,12 +993,12 @@ export interface CreatedQueueEntry {
   totalPriceRupees: number;
 }
 
-export function createQueueEntry(
-  database: DatabaseSync,
+export async function createQueueEntry(
+  database: Database,
   input: unknown,
   source: 'customer' | 'walk_in',
   now = new Date(),
-): CreatedQueueEntry {
+): Promise<CreatedQueueEntry> {
   const values = inputRecord(input);
   const customerIdValue = values['customerId'];
   const customerId =
@@ -1003,7 +1021,7 @@ export function createQueueEntry(
   ) {
     throw new ReceptionServiceError('Selected services must be a list of IDs.', 400);
   }
-  const services = getServiceDetails(database, serviceIds);
+  const services = await getServiceDetails(database, serviceIds);
   const preferredValue = values['preferredBarberId'] ?? values['barberId'] ?? null;
   if (preferredValue !== null && typeof preferredValue !== 'string') {
     throw new ReceptionServiceError('Preferred barber must be a barber ID or Any.', 400);
@@ -1018,16 +1036,17 @@ export function createQueueEntry(
   const businessDate = datePartsInBusinessTimeZone(now);
   const tokenDay = `${businessDate.year}-${String(businessDate.month).padStart(2, '0')}-${String(businessDate.day).padStart(2, '0')}`;
 
-  return inTransaction(database, () => {
-    if (!isQueueOpen(database)) {
+  return inTransaction(database, async () => {
+    await database.query('SELECT pg_advisory_xact_lock(hashtext($1))', [tokenDay]);
+    if (!(await isQueueOpen(database))) {
       throw new ReceptionServiceError(
         'The queue is closed and cannot accept walk-ins.',
         409,
       );
     }
-    const maxQueueCapacity = getOwnerSettings(database).maxQueueCapacity;
+    const maxQueueCapacity = (await getOwnerSettings(database)).maxQueueCapacity;
     if (maxQueueCapacity !== null) {
-      const waitingCount = database
+      const waitingCount = await database
         .prepare("SELECT COUNT(*) AS count FROM reception_bookings WHERE status = 'waiting'")
         .get();
       if (numberValue(waitingCount?.['count']) >= maxQueueCapacity) {
@@ -1038,21 +1057,21 @@ export function createQueueEntry(
       }
     }
     if (preferredBarberId) {
-      const preferredBarber = requireBarber(database, preferredBarberId);
+      const preferredBarber = await requireBarber(database, preferredBarberId);
       if (numberValue(preferredBarber['is_active']) !== 1) {
         throw new ReceptionServiceError('The selected barber is inactive.', 409);
       }
     }
     const customer = customerIdValue === undefined
       ? undefined
-      : getCustomer(database, customerId);
+      : await getCustomer(database, customerId);
     const resolvedName = customer?.name ?? customerName;
     const resolvedPhoneNumber = customer?.phoneNumber ?? phoneNumber;
     if (!resolvedName || !resolvedPhoneNumber) {
       throw new ReceptionServiceError('Customer details are required.', 400);
     }
 
-    const activeBooking = database
+    const activeBooking = await database
       .prepare(
         `SELECT id FROM reception_bookings
          WHERE phone_number = ? AND status IN ('waiting', 'called', 'in_service')
@@ -1067,7 +1086,7 @@ export function createQueueEntry(
     }
 
     if (customerIdValue === undefined) {
-      database
+      await database
         .prepare(
           `INSERT INTO customers (id, name, phone_number, created_at, updated_at)
            VALUES (?, ?, ?, ?, ?)`,
@@ -1075,23 +1094,25 @@ export function createQueueEntry(
         .run(customerId, resolvedName, resolvedPhoneNumber, createdAt, createdAt);
     }
 
-    database
+    await database
       .prepare(
-        `INSERT OR IGNORE INTO daily_queue_information
+        `INSERT INTO daily_queue_information
            (queue_day, next_token_sequence, created_at, updated_at)
-         VALUES (?, 1, ?, ?)`,
+         VALUES (?, 1, ?, ?)
+         ON CONFLICT (queue_day) DO NOTHING`,
       )
       .run(tokenDay, createdAt, createdAt);
-    const daily = database
+    const daily = await database
       .prepare(
         `SELECT next_token_sequence
          FROM daily_queue_information
-         WHERE queue_day = ?`,
+         WHERE queue_day = ?
+         FOR UPDATE`,
       )
       .get(tokenDay);
     const sequence = numberValue(daily?.['next_token_sequence']);
     const token = `S-${sequence}`;
-    database
+    await database
       .prepare(
         `UPDATE daily_queue_information
          SET next_token_sequence = ?, updated_at = ?
@@ -1099,7 +1120,7 @@ export function createQueueEntry(
       )
       .run(sequence + 1, createdAt, tokenDay);
 
-    database
+    await database
       .prepare(
         `INSERT INTO reception_bookings
           (id, token, token_day, customer_id, customer_name, phone_number,
@@ -1129,7 +1150,7 @@ export function createQueueEntry(
        VALUES (?, ?, ?, ?, ?)`,
     );
     for (const service of services.services) {
-      insertLine.run(
+      await insertLine.run(
         id,
         service.id,
         service.name,
@@ -1149,27 +1170,27 @@ export function createQueueEntry(
 }
 
 export function createWalkIn(
-  database: DatabaseSync,
+  database: Database,
   input: unknown,
   now = new Date(),
-): Pick<CreatedQueueEntry, 'id' | 'token'> {
+): Promise<Pick<CreatedQueueEntry, 'id' | 'token'>> {
   return createQueueEntry(database, input, 'walk_in', now);
 }
 
-function assignNextQueueEntry(
-  database: DatabaseSync,
+async function assignNextQueueEntry(
+  database: Database,
   barberId: string,
   now: Date,
   expectedBookingId?: string,
-): { id: string; token: string } {
-  const barber = requireBarber(database, barberId);
+): Promise<{ id: string; token: string }> {
+  const barber = await requireBarber(database, barberId);
   if (rowText(barber, 'status') !== 'available') {
     throw new ReceptionServiceError(
       'Only an available barber can call the next customer.',
       409,
     );
   }
-  const activeBooking = database
+  const activeBooking = await database
     .prepare(
       `SELECT id FROM reception_bookings
        WHERE assigned_barber_id = ? AND status IN ('called', 'in_service')
@@ -1182,13 +1203,14 @@ function assignNextQueueEntry(
       409,
     );
   }
-  const nextBooking = database
+  const nextBooking = await database
     .prepare(
       `SELECT id, token FROM reception_bookings
        WHERE status = 'waiting'
          AND (preferred_barber_id IS NULL OR preferred_barber_id = ?)
        ORDER BY queue_order
-       LIMIT 1`,
+       LIMIT 1
+       FOR UPDATE SKIP LOCKED`,
     )
     .get(barberId);
 
@@ -1206,7 +1228,7 @@ function assignNextQueueEntry(
     );
   }
 
-  const result = database
+  const result = await database
     .prepare(
       `UPDATE reception_bookings
        SET status = 'called', assigned_barber_id = ?, called_at = ?
@@ -1219,7 +1241,7 @@ function assignNextQueueEntry(
       409,
     );
   }
-  database
+  await database
     .prepare("UPDATE reception_barbers SET status = 'busy' WHERE id = ?")
     .run(barberId);
 
@@ -1227,34 +1249,34 @@ function assignNextQueueEntry(
 }
 
 export function callNext(
-  database: DatabaseSync,
+  database: Database,
   barberId: string,
   now = new Date(),
-): { id: string; token: string } {
-  return inTransaction(database, () =>
+): Promise<{ id: string; token: string }> {
+  return inTransaction(database, async () =>
     assignNextQueueEntry(database, barberId, now),
   );
 }
 
 export function callQueueEntry(
-  database: DatabaseSync,
+  database: Database,
   bookingId: string,
   barberId: string,
   now = new Date(),
-): { id: string; token: string } {
-  return inTransaction(database, () =>
+): Promise<{ id: string; token: string }> {
+  return inTransaction(database, async () =>
     assignNextQueueEntry(database, barberId, now, bookingId),
   );
 }
 
-export function startService(
-  database: DatabaseSync,
+export async function startService(
+  database: Database,
   bookingId: string,
   now = new Date(),
   expectedBarberId?: string,
-): void {
-  inTransaction(database, () => {
-    const booking = database
+): Promise<void> {
+  await inTransaction(database, async () => {
+    const booking = await database
       .prepare(
         `SELECT assigned_barber_id, service_started_at FROM reception_bookings
          WHERE id = ? AND status = 'called'`,
@@ -1271,7 +1293,7 @@ export function startService(
     if (
       expectedBarberId &&
       (assignedBarberId !== expectedBarberId ||
-        rowText(requireBarber(database, expectedBarberId), 'status') !== 'busy')
+        rowText(await requireBarber(database, expectedBarberId), 'status') !== 'busy')
     ) {
       throw new ReceptionServiceError(
         'This service is not assigned to this barber.',
@@ -1279,7 +1301,7 @@ export function startService(
       );
     }
 
-    const result = database
+    const result = await database
       .prepare(
         `UPDATE reception_bookings
          SET status = 'in_service', service_started_at = ?
@@ -1299,7 +1321,7 @@ export function startService(
         409,
       );
     }
-    database
+    await database
       .prepare(
         `INSERT INTO service_records
            (id, booking_id, barber_id, started_at, completed_at, created_at, updated_at)
@@ -1316,14 +1338,14 @@ export function startService(
   });
 }
 
-export function completeService(
-  database: DatabaseSync,
+export async function completeService(
+  database: Database,
   bookingId: string,
   now = new Date(),
   expectedBarberId?: string,
-): void {
-  inTransaction(database, () => {
-    const booking = database
+): Promise<void> {
+  await inTransaction(database, async () => {
+    const booking = await database
       .prepare(
         `SELECT assigned_barber_id, service_started_at FROM reception_bookings
          WHERE id = ? AND status = 'in_service'`,
@@ -1340,7 +1362,7 @@ export function completeService(
     if (
       expectedBarberId &&
       (barberId !== expectedBarberId ||
-        rowText(requireBarber(database, expectedBarberId), 'status') !== 'busy')
+        rowText(await requireBarber(database, expectedBarberId), 'status') !== 'busy')
     ) {
       throw new ReceptionServiceError(
         'This service is not assigned to this barber.',
@@ -1349,7 +1371,7 @@ export function completeService(
     }
 
     const completedAt = now.toISOString();
-    database
+    await database
       .prepare(
         `UPDATE reception_bookings
          SET status = 'completed', completed_at = ?
@@ -1357,11 +1379,11 @@ export function completeService(
       )
       .run(completedAt, bookingId);
 
-    const record = database
+    const record = await database
       .prepare('SELECT id FROM service_records WHERE booking_id = ?')
       .get(bookingId);
     if (record) {
-      database
+      await database
         .prepare(
           `UPDATE service_records
            SET completed_at = ?, updated_at = ?
@@ -1376,7 +1398,7 @@ export function completeService(
           409,
         );
       }
-      database
+      await database
         .prepare(
           `INSERT INTO service_records
              (id, booking_id, barber_id, started_at, completed_at, created_at, updated_at)
@@ -1394,19 +1416,19 @@ export function completeService(
     }
 
     if (barberId) {
-      database
+      await database
         .prepare("UPDATE reception_barbers SET status = 'available' WHERE id = ?")
         .run(barberId);
     }
   });
 }
 
-function markWaitingBooking(
-  database: DatabaseSync,
+async function markWaitingBooking(
+  database: Database,
   bookingId: string,
   status: 'cancelled' | 'no_show',
-): void {
-  const result = database
+): Promise<void> {
+  const result = await database
     .prepare(
       `UPDATE reception_bookings
        SET status = ?
@@ -1422,34 +1444,34 @@ function markWaitingBooking(
   }
 }
 
-export function cancelWaitingBooking(database: DatabaseSync, bookingId: string): void {
-  inTransaction(database, () => markWaitingBooking(database, bookingId, 'cancelled'));
+export function cancelWaitingBooking(database: Database, bookingId: string): Promise<void> {
+  return inTransaction(database, () => markWaitingBooking(database, bookingId, 'cancelled'));
 }
 
 export function markWaitingBookingNoShow(
-  database: DatabaseSync,
+  database: Database,
   bookingId: string,
-): void {
-  inTransaction(database, () => markWaitingBooking(database, bookingId, 'no_show'));
+): Promise<void> {
+  return inTransaction(database, () => markWaitingBooking(database, bookingId, 'no_show'));
 }
 
-function getBookingDurationMinutes(
-  database: DatabaseSync,
-  row: Record<string, SQLOutputValue>,
-): number {
+async function getBookingDurationMinutes(
+  database: Database,
+  row: DatabaseRow,
+): Promise<number> {
   const durationMinutes = numberValue(row['duration_minutes']);
   if (durationMinutes > 0) return durationMinutes;
 
   const serviceIds = JSON.parse(rowText(row, 'service_ids')) as string[];
-  return getBookingServiceDetails(database, rowText(row, 'id'), serviceIds)
+  return (await getBookingServiceDetails(database, rowText(row, 'id'), serviceIds))
     .durationMinutes;
 }
 
-function estimateWaitingQueue(
-  database: DatabaseSync,
+async function estimateWaitingQueue(
+  database: Database,
   now: Date,
-): Map<string, number | null> {
-  const waiting = database
+): Promise<Map<string, number | null>> {
+  const waiting = await database
     .prepare(
       `SELECT id, preferred_barber_id, service_ids, duration_minutes
        FROM reception_bookings
@@ -1459,15 +1481,15 @@ function estimateWaitingQueue(
     .all();
   const minuteInMs = 60_000;
   const nowInMs = now.getTime();
-  const barberSlots = database
+  const barberSlots = (await database
     .prepare(
       `SELECT id FROM reception_barbers
        WHERE status != 'on_break' AND is_active = 1`,
     )
-    .all()
-    .map((barber) => {
+    .all())
+    .map(async (barber) => {
       const barberId = rowText(barber, 'id');
-      const active = database
+      const active = await database
         .prepare(
           `SELECT id, status, service_started_at, service_ids, duration_minutes
            FROM reception_bookings
@@ -1479,26 +1501,27 @@ function estimateWaitingQueue(
 
       if (active && rowText(active, 'status') === 'called') {
         availableAt +=
-          getBookingDurationMinutes(database, active) * minuteInMs;
+          (await getBookingDurationMinutes(database, active)) * minuteInMs;
       } else if (active) {
         const startedAt = nullableRowText(active, 'service_started_at');
         if (startedAt) {
           availableAt = Math.max(
             nowInMs,
             Date.parse(startedAt) +
-              getBookingDurationMinutes(database, active) * minuteInMs,
+              (await getBookingDurationMinutes(database, active)) * minuteInMs,
           );
         }
       }
 
       return { id: barberId, availableAt };
     });
+  const resolvedBarberSlots = await Promise.all(barberSlots);
 
   const estimates = new Map<string, number | null>();
   for (const entry of waiting) {
     const bookingId = rowText(entry, 'id');
     const preferredBarberId = nullableRowText(entry, 'preferred_barber_id');
-    const slot = barberSlots
+    const slot = resolvedBarberSlots
       .filter(
         (candidate) =>
           preferredBarberId === null || candidate.id === preferredBarberId,
@@ -1515,21 +1538,21 @@ function estimateWaitingQueue(
       Math.max(0, Math.ceil((slot.availableAt - nowInMs) / minuteInMs)),
     );
     slot.availableAt +=
-      getBookingDurationMinutes(database, entry) * minuteInMs;
+      (await getBookingDurationMinutes(database, entry)) * minuteInMs;
   }
 
   return estimates;
 }
 
-export function getReceptionDashboard(
-  database: DatabaseSync,
+export async function getReceptionDashboard(
+  database: Database,
   now = new Date(),
   filters: {
     search?: string;
     status?: string;
     barberId?: string;
   } = {},
-): ReceptionDashboard {
+): Promise<ReceptionDashboard> {
   const businessDate = datePartsInBusinessTimeZone(now);
   const dayStart = startOfBusinessDay(
     businessDate.year,
@@ -1545,15 +1568,15 @@ export function getReceptionDashboard(
     nextDate.getUTCDate(),
   ).toISOString();
 
-  const barbers = database
+  const barbers = await Promise.all((await database
     .prepare(
       'SELECT id, name, photo_url, status, is_active FROM reception_barbers WHERE is_active = 1 ORDER BY created_at, id',
     )
-    .all()
-    .map((row) => mapBarber(database, row, now));
-  const estimatedWaits = estimateWaitingQueue(database, now);
+    .all())
+    .map((row) => mapBarber(database, row, now)));
+  const estimatedWaits = await estimateWaitingQueue(database, now);
 
-  const bookings = database
+  const bookings = await Promise.all((await database
     .prepare(
       `SELECT booking.id, booking.token, booking.customer_name, booking.service_ids,
               booking.duration_minutes, booking.total_price_rupees,
@@ -1581,9 +1604,9 @@ export function getReceptionDashboard(
       filters.status ?? '',
       filters.barberId ?? '',
       filters.barberId ?? '',
-    )
-    .map((row) => {
-      const booking = mapBooking(database, row, now);
+    ))
+    .map(async (row) => {
+      const booking = await mapBooking(database, row, now);
       const estimatedWaitMinutes =
         booking.status === 'waiting'
           ? (estimatedWaits.get(booking.id) ?? null)
@@ -1592,9 +1615,9 @@ export function getReceptionDashboard(
             : null;
 
       return { ...booking, estimatedWaitMinutes };
-    });
+    }));
 
-  const metrics = database
+  const metrics = await database
     .prepare(
       `SELECT
          SUM(CASE WHEN status = 'waiting' THEN 1 ELSE 0 END) AS waiting,
@@ -1603,7 +1626,7 @@ export function getReceptionDashboard(
        WHERE status IN ('waiting', 'in_service')`,
     )
     .get();
-  const servedToday = database
+  const servedToday = await database
     .prepare(
       `SELECT COUNT(*) AS count FROM reception_bookings
        WHERE status = 'completed' AND completed_at >= ? AND completed_at < ?`,
@@ -1611,7 +1634,7 @@ export function getReceptionDashboard(
     .get(dayStart, dayEnd);
 
   return {
-    queueOpen: isQueueOpen(database),
+    queueOpen: await isQueueOpen(database),
     generatedAt: now.toISOString(),
     overview: {
       waiting: numberValue(metrics?.['waiting']),
@@ -1619,18 +1642,18 @@ export function getReceptionDashboard(
       availableBarbers: barbers.filter((barber) => barber.status === 'available').length,
       servedToday: numberValue(servedToday?.['count']),
     },
-    services: listSalonServices(database),
+    services: await listSalonServices(database),
     barbers,
     bookings,
   };
 }
 
-function mapBarberDashboardBooking(
-  database: DatabaseSync,
-  row: Record<string, SQLOutputValue>,
-): BarberDashboardBooking {
+async function mapBarberDashboardBooking(
+  database: Database,
+  row: DatabaseRow,
+): Promise<BarberDashboardBooking> {
   const serviceIds = JSON.parse(rowText(row, 'service_ids')) as string[];
-  const services = getBookingServiceDetails(
+  const services = await getBookingServiceDetails(
     database,
     rowText(row, 'id'),
     serviceIds,
@@ -1650,14 +1673,14 @@ function mapBarberDashboardBooking(
   };
 }
 
-export function getBarberDashboard(
-  database: DatabaseSync,
+export async function getBarberDashboard(
+  database: Database,
   barberId: string,
   now = new Date(),
-): BarberDashboard {
-  const barber = requireBarber(database, barberId);
+): Promise<BarberDashboard> {
+  const barber = await requireBarber(database, barberId);
 
-  const current = database
+  const current = await database
     .prepare(
       `SELECT id, token, customer_name, service_ids, duration_minutes,
               total_price_rupees, status, created_at, service_started_at
@@ -1667,7 +1690,7 @@ export function getBarberDashboard(
        LIMIT 1`,
     )
     .get(barberId);
-  const next = database
+  const next = await database
     .prepare(
       `SELECT id, token, customer_name, service_ids, duration_minutes,
              total_price_rupees, status, created_at, service_started_at
@@ -1688,17 +1711,19 @@ export function getBarberDashboard(
       status: rowText(barber, 'status') as BarberStatus,
       isActive: numberValue(barber['is_active']) === 1,
     },
-    currentCustomer: current ? mapBarberDashboardBooking(database, current) : null,
-    nextCustomer: next ? mapBarberDashboardBooking(database, next) : null,
+    currentCustomer: current
+      ? await mapBarberDashboardBooking(database, current)
+      : null,
+    nextCustomer: next ? await mapBarberDashboardBooking(database, next) : null,
   };
 }
 
-export function getQueueEntryStatus(
-  database: DatabaseSync,
+export async function getQueueEntryStatus(
+  database: Database,
   bookingId: string,
   now = new Date(),
-): QueueEntryStatus {
-  const row = database
+): Promise<QueueEntryStatus> {
+  const row = await database
     .prepare(
       `SELECT booking.id, booking.token, booking.customer_name,
               booking.service_ids, booking.duration_minutes,
@@ -1716,7 +1741,7 @@ export function getQueueEntryStatus(
     .get(bookingId);
   if (!row) throw new ReceptionServiceError('Queue entry not found.', 404);
 
-  const booking = mapBarberDashboardBooking(database, row);
+  const booking = await mapBarberDashboardBooking(database, row);
   if (booking.status !== 'waiting') {
     return {
       ...booking,
@@ -1732,7 +1757,7 @@ export function getQueueEntryStatus(
     };
   }
 
-  const waiting = database
+  const waiting = await database
     .prepare(
       `SELECT id
        FROM reception_bookings
@@ -1743,7 +1768,7 @@ export function getQueueEntryStatus(
   const position =
     waiting.findIndex((entry) => rowText(entry, 'id') === bookingId) + 1;
   const estimatedWaitMinutes =
-    estimateWaitingQueue(database, now).get(bookingId) ?? null;
+    (await estimateWaitingQueue(database, now)).get(bookingId) ?? null;
 
   return {
     ...booking,
@@ -1758,11 +1783,11 @@ export function getQueueEntryStatus(
   };
 }
 
-export function getOwnerDailyStatistics(
-  database: DatabaseSync,
+export async function getOwnerDailyStatistics(
+  database: Database,
   day?: string,
   now = new Date(),
-): {
+): Promise<{
   day: string;
   waiting: number;
   inService: number;
@@ -1776,7 +1801,7 @@ export function getOwnerDailyStatistics(
   nextTokenSequence: number;
   activeBarbers: number;
   averageWaitMinutes: number | null;
-} {
+}> {
   let businessDate = datePartsInBusinessTimeZone(now);
   if (day !== undefined) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) {
@@ -1808,7 +1833,7 @@ export function getOwnerDailyStatistics(
     nextDate.getUTCMonth() + 1,
     nextDate.getUTCDate(),
   ).toISOString();
-  const queueMetrics = database
+  const queueMetrics = await database
     .prepare(
       `SELECT
          SUM(CASE WHEN status = 'waiting' THEN 1 ELSE 0 END) AS waiting,
@@ -1819,7 +1844,7 @@ export function getOwnerDailyStatistics(
        WHERE created_at >= ? AND created_at < ?`,
     )
     .get(dayStart, dayEnd);
-  const completedMetrics = database
+  const completedMetrics = await database
     .prepare(
       `SELECT COUNT(*) AS completed,
               COALESCE(SUM(total_price_rupees), 0) AS sales
@@ -1827,7 +1852,7 @@ export function getOwnerDailyStatistics(
        WHERE status = 'completed' AND completed_at >= ? AND completed_at < ?`,
     )
     .get(dayStart, dayEnd);
-  const completedServiceCount = database
+  const completedServiceCount = await database
     .prepare(
       `SELECT COUNT(*) AS count
        FROM booking_services AS line
@@ -1836,27 +1861,28 @@ export function getOwnerDailyStatistics(
          AND booking.completed_at >= ? AND booking.completed_at < ?`,
     )
     .get(dayStart, dayEnd);
-  const availableBarbers = database
+  const availableBarbers = await database
     .prepare(
       "SELECT COUNT(*) AS count FROM reception_barbers WHERE status = 'available' AND is_active = 1",
     )
     .get();
-  const activeBarbers = database
+  const activeBarbers = await database
     .prepare('SELECT COUNT(*) AS count FROM reception_barbers WHERE is_active = 1')
     .get();
-  const currentWaiting = database
+  const currentWaiting = await database
     .prepare("SELECT COUNT(*) AS count FROM reception_bookings WHERE status = 'waiting'")
     .get();
-  const averageWait = database
+  const averageWait = await database
     .prepare(
       `SELECT ROUND(AVG(
-         MAX(0, (julianday(called_at) - julianday(created_at)) * 1440)
+         GREATEST(0, EXTRACT(EPOCH FROM
+           (called_at::timestamptz - created_at::timestamptz)) / 60)
        )) AS minutes
        FROM reception_bookings
        WHERE called_at >= ? AND called_at < ?`,
     )
     .get(dayStart, dayEnd);
-  const dailyQueue = database
+  const dailyQueue = await database
     .prepare(
       `SELECT next_token_sequence
        FROM daily_queue_information
@@ -1886,11 +1912,11 @@ export function getOwnerDailyStatistics(
   };
 }
 
-export function getBookingStatus(
-  database: DatabaseSync,
+export async function getBookingStatus(
+  database: Database,
   bookingId: string,
-): BookingStatus | null {
-  const booking = database
+): Promise<BookingStatus | null> {
+  const booking = await database
     .prepare('SELECT status FROM reception_bookings WHERE id = ?')
     .get(bookingId);
   return booking ? (rowText(booking, 'status') as BookingStatus) : null;

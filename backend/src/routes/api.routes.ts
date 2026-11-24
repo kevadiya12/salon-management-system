@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import type { DatabaseSync } from 'node:sqlite';
+import type { Database } from '../database/client.js';
 import type { Server as SocketServer } from 'socket.io';
 import { createAuthController } from '../controllers/auth.controller.js';
 import { createApiController } from '../controllers/api.controller.js';
@@ -14,7 +14,7 @@ import {
 } from '../middleware/authentication.js';
 
 export function createApiRouter(
-  database: DatabaseSync,
+  database: Database,
   io: SocketServer,
 ): Router {
   const router = Router();

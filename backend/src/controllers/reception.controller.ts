@@ -1,5 +1,5 @@
 import type { RequestHandler } from 'express';
-import type { DatabaseSync } from 'node:sqlite';
+import type { Database } from '../database/client.js';
 import type { Server as SocketServer } from 'socket.io';
 import { emitSalonEvent } from '../socket/events.js';
 import {
@@ -44,10 +44,10 @@ function optionalQueryString(value: unknown, label: string): string {
 }
 
 export function createReceptionController(
-  database: DatabaseSync,
+  database: Database,
   io: SocketServer,
 ) {
-  const getDashboard: RequestHandler = (request, response) => {
+  const getDashboard: RequestHandler = async (request, response) => {
     const status = optionalQueryString(request.query['status'], 'Status');
     const allowedStatuses = new Set(['waiting', 'called', 'in_service']);
     if (status && !allowedStatuses.has(status)) {
@@ -55,7 +55,7 @@ export function createReceptionController(
     }
     response.status(200).json({
       success: true,
-      data: getReceptionDashboard(database, new Date(), {
+      data: await getReceptionDashboard(database, new Date(), {
         search: optionalQueryString(request.query['search'], 'Search'),
         status,
         barberId: optionalQueryString(request.query['barberId'], 'Barber ID'),
@@ -63,20 +63,20 @@ export function createReceptionController(
     });
   };
 
-  const getBarberView: RequestHandler = (request, response) => {
+  const getBarberView: RequestHandler = async (request, response) => {
     response.status(200).json({
       success: true,
-      data: getBarberDashboard(
+      data: await getBarberDashboard(
         database,
         routeId(request.params['barberId'], 'Barber ID'),
       ),
     });
   };
 
-  const addWalkIn: RequestHandler = (request, response) => {
-    const booking = createWalkIn(database, request.body);
-    const dashboard = getReceptionDashboard(database);
-    emitSalonEvent(database, io, 'queue:joined', { bookingId: booking.id });
+  const addWalkIn: RequestHandler = async (request, response) => {
+    const booking = await createWalkIn(database, request.body);
+    const dashboard = await getReceptionDashboard(database);
+    await emitSalonEvent(database, io, 'queue:joined', { bookingId: booking.id });
     response.status(201).json({
       success: true,
       data: booking,
@@ -84,10 +84,10 @@ export function createReceptionController(
     });
   };
 
-  const addBarber: RequestHandler = (request, response) => {
-    const barber = createBarber(database, request.body);
-    const dashboard = getReceptionDashboard(database);
-    emitSalonEvent(database, io, 'barber:updated', { barberId: barber.id });
+  const addBarber: RequestHandler = async (request, response) => {
+    const barber = await createBarber(database, request.body);
+    const dashboard = await getReceptionDashboard(database);
+    await emitSalonEvent(database, io, 'barber:updated', { barberId: barber.id });
     response.status(201).json({
       success: true,
       data: barber,
@@ -95,22 +95,22 @@ export function createReceptionController(
     });
   };
 
-  const changeBarberAvailability: RequestHandler = (request, response) => {
+  const changeBarberAvailability: RequestHandler = async (request, response) => {
     const barberId = routeId(request.params['barberId'], 'Barber ID');
-    setBarberAvailability(database, barberId, request.body?.status);
-    const dashboard = getReceptionDashboard(database);
-    emitSalonEvent(database, io, 'barber:updated', { barberId });
+    await setBarberAvailability(database, barberId, request.body?.status);
+    const dashboard = await getReceptionDashboard(database);
+    await emitSalonEvent(database, io, 'barber:updated', { barberId });
     response.status(200).json({
       success: true,
       dashboard,
-      barberDashboard: getBarberDashboard(database, barberId),
+      barberDashboard: await getBarberDashboard(database, barberId),
     });
   };
 
-  const changeQueueState: RequestHandler = (request, response) => {
-    setQueueOpen(database, request.body?.open);
-    const dashboard = getReceptionDashboard(database);
-    emitSalonEvent(database, io, 'salon:queue-status', {
+  const changeQueueState: RequestHandler = async (request, response) => {
+    await setQueueOpen(database, request.body?.open);
+    const dashboard = await getReceptionDashboard(database);
+    await emitSalonEvent(database, io, 'salon:queue-status', {
       queueOpen: dashboard.queueOpen,
     });
     response.status(200).json({
@@ -119,11 +119,11 @@ export function createReceptionController(
     });
   };
 
-  const callNextCustomer: RequestHandler = (request, response) => {
+  const callNextCustomer: RequestHandler = async (request, response) => {
     const barberId = routeId(request.params['barberId'], 'Barber ID');
-    const booking = callNext(database, barberId);
-    const dashboard = getReceptionDashboard(database);
-    emitSalonEvent(database, io, 'queue:called', {
+    const booking = await callNext(database, barberId);
+    const dashboard = await getReceptionDashboard(database);
+    await emitSalonEvent(database, io, 'queue:called', {
       bookingId: booking.id,
       barberId,
     });
@@ -134,48 +134,48 @@ export function createReceptionController(
     });
   };
 
-  const beginService: RequestHandler = (request, response) => {
+  const beginService: RequestHandler = async (request, response) => {
     const bookingId = routeId(request.params['bookingId'], 'Booking ID');
     const barberId = requiredBodyBarberId(request.body);
-    startService(database, bookingId, new Date(), barberId);
-    const dashboard = getReceptionDashboard(database);
-    emitSalonEvent(database, io, 'service:started', { bookingId, barberId });
+    await startService(database, bookingId, new Date(), barberId);
+    const dashboard = await getReceptionDashboard(database);
+    await emitSalonEvent(database, io, 'service:started', { bookingId, barberId });
     response.status(200).json({
       success: true,
       dashboard,
-      barberDashboard: getBarberDashboard(database, barberId),
+      barberDashboard: await getBarberDashboard(database, barberId),
     });
   };
 
-  const finishService: RequestHandler = (request, response) => {
+  const finishService: RequestHandler = async (request, response) => {
     const bookingId = routeId(request.params['bookingId'], 'Booking ID');
     const barberId = requiredBodyBarberId(request.body);
-    completeService(database, bookingId, new Date(), barberId);
-    const dashboard = getReceptionDashboard(database);
-    emitSalonEvent(database, io, 'service:completed', { bookingId, barberId });
+    await completeService(database, bookingId, new Date(), barberId);
+    const dashboard = await getReceptionDashboard(database);
+    await emitSalonEvent(database, io, 'service:completed', { bookingId, barberId });
     response.status(200).json({
       success: true,
       dashboard,
-      barberDashboard: getBarberDashboard(database, barberId),
+      barberDashboard: await getBarberDashboard(database, barberId),
     });
   };
 
-  const cancelBooking: RequestHandler = (request, response) => {
+  const cancelBooking: RequestHandler = async (request, response) => {
     const bookingId = routeId(request.params['bookingId'], 'Booking ID');
-    cancelWaitingBooking(database, bookingId);
-    const dashboard = getReceptionDashboard(database);
-    emitSalonEvent(database, io, 'queue:cancelled', { bookingId });
+    await cancelWaitingBooking(database, bookingId);
+    const dashboard = await getReceptionDashboard(database);
+    await emitSalonEvent(database, io, 'queue:cancelled', { bookingId });
     response.status(200).json({
       success: true,
       dashboard,
     });
   };
 
-  const markNoShow: RequestHandler = (request, response) => {
+  const markNoShow: RequestHandler = async (request, response) => {
     const bookingId = routeId(request.params['bookingId'], 'Booking ID');
-    markWaitingBookingNoShow(database, bookingId);
-    const dashboard = getReceptionDashboard(database);
-    emitSalonEvent(database, io, 'queue:no-show', { bookingId });
+    await markWaitingBookingNoShow(database, bookingId);
+    const dashboard = await getReceptionDashboard(database);
+    await emitSalonEvent(database, io, 'queue:no-show', { bookingId });
     response.status(200).json({
       success: true,
       dashboard,
