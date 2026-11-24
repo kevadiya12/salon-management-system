@@ -39,3 +39,6 @@ Open <http://localhost:5173>. The backend listens on port 4000 by default; the V
 The SQLite schema and three default service records are initialized at backend startup. No barbers or customers are seeded. The project currently has no authentication; do not expose its mutation or customer-data endpoints to an untrusted network.
 
 See [setup and running](docs/07-setup-and-running.md) for environment variables and deployment notes, and [testing guide](docs/08-testing-guide.md) for validation commands.
+
+# salon-management-system
+Salon Queue Management System using React, Node.js, Express and SQLite
