@@ -1,151 +1,1166 @@
-#here
+# ✂️ Salon Queue Management System
+
+## Complete AI Development Prompt Documentation
+
+### From Idea → Planning → UI Design → Development → Testing → Deployment
+
+---
+
+# 1. Project Overview
+
+## 1.1 Project Name
 Salon Queue Management System
-All-in-One Prompt Book — From Initial Planning to Live Deployment
-All-in-One Prompt Book — From Initial Planning to Live Deployment
 
-Prepared from the salon project brief, the original vibe-coding guide available in the project history, and the later implementation/debugging/deployment conversations.
+## 1.2 Live Project
+https://salon-management-system-1-dbkv.onrender.com/
 
-Important accuracy note: the original starter guide and several later prompts were available. Where an exact historical message was not retrievable word-for-word, the prompt is clearly presented as a consolidated/reconstructed version based on the recorded requirement—not as a verbatim transcript.
-Project snapshot
-- Project: Salon Queue Management System.
-- Original planned stack: React + Vite + TypeScript + Tailwind CSS frontend; Node.js + Express + TypeScript backend; SQLite initially; Socket.IO for real-time updates; JWT authentication and role-based access control.
-- Deployment direction used later: separate frontend and backend deployments on Render, with hosted PostgreSQL (Neon) through DATABASE_URL. Do not use a local SQLite file path such as /var/data on an ephemeral/free deployment.
-- Main routes: /, /join, /status/:id, /reception, /barber/:barberId, /display, /admin.
-- Visual direction: premium salon interface; charcoal/dark surfaces, gold accent (#D4A017), cream text/surfaces, responsive/mobile-first layouts.
-- Roles: Customer, Receptionist, Barber, Owner/Admin, and public waiting-area display.
-Contents / recommended order
-1. A. Product scope and requirements
-2. B. Screen and workflow specification
-3. C. Agent instructions and project setup
-4. D. Frontend build prompts
-5. E. Backend, database and real-time prompts
-6. F. Authentication and role permissions
-7. G. Testing, bug fixing and UI refinement
-8. H. Deployment preparation
-9. I. Render backend deployment and PostgreSQL migration
-10. J. Render frontend deployment and connection
-11. K. Final verification and handover
-A. Product scope and requirements
-Prompt 0 — Understand the project before coding
-Read the project brief and all files in docs/. Explain the Salon Queue Management System in 8 clear bullets. Identify the user roles, all screens, the main customer journey, queue rules, technical stack, and anything ambiguous or contradictory. Do not write code, install packages, or modify files yet. Ask only essential questions and wait for approval.
-Prompt 1 — Create the project brief (docs/01-brief.md)
-Create docs/01-brief.md for a Salon Queue Management System.
-Problem: customers currently wait without knowing their turn, and staff need a reliable first-come-first-served queue.
-Users: customers, receptionist, barbers, and salon owner/admin.
-Must-have features:
-1. Customers join the live queue from their phone.
-2. Customers select one or more services (maximum 3) and choose a specific barber or Any barber.
-3. Customers see a token, queue position, estimated wait, and live status.
-4. Reception can add walk-ins, call the next eligible customer, cancel a spot, and mark no-shows.
-5. Barbers can view their current/next customers and mark Start and Done; they can set Available or On break.
-6. A public TV display shows barber activity and the next tokens.
-7. Owner/admin manages services, prices, durations, barber availability, queue open/closed state, and daily statistics.
-Do not build online payments, future-date appointments, SMS/WhatsApp messaging, loyalty points, or multiple branches unless already explicitly required by the existing project.
-Use a premium, mobile-first charcoal-and-gold design. Support English and Gujarati labels. Keep the brief concise and use it as the source of truth.
-Prompt 2 — Create the screen specification (docs/02-screens.md)
-Create docs/02-screens.md. For every screen document its route, user, purpose, layout from top to bottom, controls and exact button behaviour, responsive behaviour, loading/empty/error states, and access requirements.
-Screens:
-1. Home (/): salon branding, open/closed status, live queue summary, barber availability, Join Queue CTA.
-2. Join Queue (/join): customer name, validated 10-digit phone, service cards (maximum 3), barber preference, live total duration/price/wait summary, confirmation.
-3. My Status (/status/:id): large token, position, estimated wait, Start coming message when near turn, prominent It's your turn state, cancel with confirmation.
-4. Reception (/reception): tablet-first barber cards, waiting list, Call next, Add walk-in, No-show and Cancel.
-5. Barber (/barber/:barberId): current customer, selected services, service timer, Start/Done, next eligible customer, Available/On break toggle.
-6. Public display (/display): large readable barber rows, current token and next five tokens, clear called-token highlight and optional chime.
-7. Admin (/admin): service CRUD, barber duty toggles, online queue open/close, business hours and today's stats.
-Use realistic Indian sample names and rupee prices, but keep all data configurable. Do not invent extra screens.
-Prompt 3 — Create flows, queue rules and test checklist (docs/03-flows-rules.md)
-Create docs/03-flows-rules.md with customer-online and receptionist-walk-in flows, state transitions, barber assignment rules, wait-time calculation, no-show/cancel behaviour, and at least 10 acceptance tests.
-Rules:
-- Normal lifecycle: Waiting -> Called -> In chair -> Done. Waiting may become Cancelled. Called may become No-show. Never silently move a customer backwards.
-- First come, first served among customers eligible for the selected barber.
-- Call next for barber X chooses the earliest Waiting customer who selected X or Any.
-- A customer who selected a specific barber must never be assigned to a different barber.
-- A barber may have only one active In chair customer.
-- Estimate wait using service durations ahead and currently working/available barbers; document the exact formula and handle zero available barbers.
-- A phone number may have only one active queue entry.
-- If a Called customer does not arrive within 10 minutes, reception may mark No-show. If they return, add them at the end with a new token.
-- Online joining closes 30 minutes before closing; reception can still add walk-ins.
-- Customers assigned to a barber on break must see a clear explanation and must not be silently reassigned.
-Include tests for duplicate phone, service total, barber preference, no-show/re-add, live updates, queue closure, Gujarati labels, and wait-time recalculation.
-Prompt 4 — Create AGENTS.md
-Create a concise AGENTS.md in the repository root. It must instruct Antigravity/Codex to read docs/01-brief.md, docs/02-screens.md and docs/03-flows-rules.md before changing code. State the approved stack, run/build commands, charcoal-and-gold theme, English/Gujarati translation requirement, centralized queue rules, role-based access, and deployment direction. Work on one feature at a time; do not remove existing working features; inspect existing code before replacing anything. After each task list changed files, commands run, test results, and any remaining issues. Never place secrets in source control.
-B. Screen and workflow prompts
-Prompt 5 — Project initialization and seven route shells
-Read AGENTS.md and all docs/. Inspect the existing repository first. Set up or complete the React + Vite + TypeScript + Tailwind frontend and Node + Express + TypeScript backend using the simplest architecture consistent with the current code. Configure routing for /, /join, /status/:id, /reception, /barber/:barberId, /display and /admin. Add shared layout, theme tokens, English/Gujarati language switching, environment configuration, and a basic GET /api/health endpoint. Do not implement fake production queue behaviour. Run frontend and backend, build/type-check both, and report exact commands and results.
-Prompt 6 — Premium home page
-Build only the Home screen (/) according to docs/02-screens.md. Create a polished, premium salon landing page with responsive navigation, salon name/logo area, Open/Closed badge, live queue count and estimated wait, barber availability chips, service highlights, a clear gold Join Queue button, how-it-works section, and footer. Use realistic placeholder content only where backend data is not ready, and label it as demo data. Match the charcoal/gold design. Do not modify other screens. Test desktop and mobile layouts.
-Prompt 7 — Join Queue screen
-Build /join from docs/02-screens.md. Include customer name, 10-digit Indian phone validation, service selection with a maximum of 3 active services, barber preference (Any or a specific barber), and a live summary of total service duration, price, and estimated wait. Disable confirmation until inputs are valid. Submit to the backend; do not create a fake successful booking. Handle duplicate active phone numbers, closed online queue, unavailable services, API errors, loading state, and success navigation to /status/:id. Keep the UI mobile-first.
-Prompt 8 — My Queue Status
-Build /status/:id using real backend queue data. Show the token prominently, current status, position, estimated wait, selected services and barber. Add the Start coming state when the customer is close to the front, and an accessible full-screen/high-emphasis It's your turn state when called. Provide Cancel my spot with a confirmation dialog. Subscribe to real-time updates and recover gracefully after refresh or lost connection. Never display fabricated queue values.
-Prompt 9 — Reception dashboard
-Build /reception for a 10-inch tablet in landscape and make it responsive. Show barber cards with current customer, elapsed/service time and Call next action. Show the ordered waiting list with token, customer, services, preferred barber, wait and status. Add + Add walk-in form, No-show and Cancel actions with confirmation where destructive. Highlight long waits. All actions must call the backend and update other connected screens. Use sample data only in an explicitly marked demo mode.
-Prompt 10 — Barber dashboard
-Build /barber/:barberId. Show the authenticated barber's current customer, token, services, timer, and next eligible customer. Implement Start and Done with correct state transitions. Include Available/On break control. Prevent starting a second customer while one is In chair. Enforce barber identity and permissions on the server, not only in the UI. Synchronize changes with reception, customer status and public display.
-Prompt 11 — Waiting-area TV display
-Build /display as a full-screen public display readable from at least 5 metres. Show each barber, current token/customer-safe display information, and the next five tokens with clear hierarchy. Newly called tokens should be highlighted clearly with a subtle animation and optional chime. Do not expose phone numbers or private customer details. Keep the screen continuously synchronized through the backend and Socket.IO.
-Prompt 12 — Owner/Admin settings
-Build /admin for authorized owner/admin users. Add service management (English/Gujarati name, duration, price, active toggle), barber duty/availability controls, online queue Open/Closed switch, business opening/closing time, and daily statistics (served customers, average wait, no-shows). Turning off a service must remove it from new customer selection without corrupting existing queue entries. Closing online joining must disable the customer Join action but preserve receptionist walk-ins. Validate all changes on the backend.
-C. Backend, database and real-time prompts
-Prompt 13 — Backend API and data model
-Audit the existing backend before coding. Implement or complete a clean Express + TypeScript API for services, barbers, queue entries, customer status, reception actions, barber actions, admin settings and statistics. Define validated request/response types, centralized error handling, input validation, consistent HTTP status codes, and database constraints. Preserve the existing project structure and features where possible. Document endpoints and required environment variables. Do not hard-code credentials.
-Prompt 14 — Queue engine and business rules
-Implement the queue engine in one centralized service/module and make every route use it. Enforce first-come-first-served among barber-eligible entries, Any-barber eligibility, specific-barber restrictions, one active customer per barber, allowed status transitions, duplicate active phone prevention, no-show/re-add at the end with a new token, online closure rules and correct wait estimates. Add unit/integration tests for edge cases. Explain the wait-time formula and how it behaves when no barber is available.
-Prompt 15 — Socket.IO live synchronization
-Integrate Socket.IO so customer Join/Status, Reception, Barber and TV Display remain synchronized across separate browsers/devices. Broadcast only the minimum safe event payloads after successful database commits. Cover queue-created, queue-called, started, completed, cancelled, no-show, barber availability and admin settings changes. Reconnect and refetch authoritative state after network interruption. Target visible updates within 5 seconds. Add tests or a manual multi-window verification procedure.
-Prompt 16 — Database migration and persistence audit
-Inspect the current database implementation and all queries before making changes. Ensure the production database is persistent and supports the deployed multi-user application. If migrating from SQLite to hosted PostgreSQL, create a safe schema/migration plan, preserve users, services, barbers, queue records and relationships, use parameterized queries, indexes and transactions, and verify the migration with counts and sample reads. Do not use a local filesystem database for a horizontally deployed or ephemeral service. Never print or commit database credentials.
-D. Authentication, authorization and security
-Prompt 17 — Complete authentication and RBAC
-Audit authentication end to end. Implement secure login/logout and JWT session handling with a strong JWT_SECRET supplied only through environment variables. Enforce role-based access for Owner/Admin, Receptionist and Barber routes and APIs; customer/public status endpoints must expose only the information needed for that customer/public display. Verify barber identity against the authenticated account and route parameter. Hash passwords with a modern password-hashing library, validate inputs, protect privileged operations, configure CORS for the actual frontend origin, and avoid leaking secrets or stack traces. Do not create a public default admin account. Provide a secure documented owner-seeding procedure and test every role.
-Prompt 18 — Authentication bug investigation
-The login/authentication flow is not working reliably. Trace the complete flow from frontend form submission through API route, validation, database lookup, password verification, JWT creation, token storage/cookie handling, protected route middleware and role checks. Reproduce the failure, identify the root cause, and fix it without weakening security or bypassing authentication. Check whether an initial Owner account exists and provide a secure one-time setup/seed process if it does not. Verify JWT_SECRET is configured locally and in production, is at least 32 bytes, and is never committed. Test successful login, wrong password, missing token, expired token and unauthorized role.
-Prompt 19 — CORS and frontend/backend connection
-Inspect the frontend API base URL, backend CORS configuration, credentials/cookie settings, and production environment variables. Configure the backend to allow the exact deployed frontend origin(s), while retaining localhost origins for local development through environment configuration. Remove hard-coded localhost URLs from production code. Confirm preflight requests, login, authenticated API requests and Socket.IO connections work from the deployed frontend. Do not use wildcard CORS with credentials.
-E. Quality assurance and refinement
-Prompt 20 — Full acceptance test
-Read docs/03-flows-rules.md and execute every acceptance test against the real application. Test the complete customer journey, walk-in journey, barber-specific assignment, Any-barber assignment, duplicate phone, service totals, call/start/done, cancellation, no-show/re-add, queue closure, barber break, live synchronization, Gujarati translation, mobile layout, tablet reception and TV display. For each test report PASS/FAIL, exact steps, observed result and evidence. Fix failures one by one without breaking passing functionality. Do not claim a test passed unless it was actually run.
-Prompt 21 — Bug-fix template (use for each issue)
-Bug location/route: [enter route or screen].
-Steps to reproduce: [exact clicks/actions].
-Actual result: [what currently happens].
-Expected result: [what should happen].
-Console/server error: [paste relevant error].
-Inspect the root cause first. Explain it briefly, make the smallest safe fix, and do not redesign unrelated screens or remove existing features. Add a regression test. Run the relevant test, build and type-check, then list changed files and results.
-Prompt 22 — Specific no-show ordering bug
-When a customer is marked No-show and later added again, the new entry must go to the END of the queue with a NEW token. Inspect token generation, queue ordering, timestamps and status filtering. Explain why the current implementation places the customer incorrectly, fix it transactionally, and add a regression test proving the re-added customer is behind all currently waiting eligible customers.
-Prompt 23 — Specific wait-time bug
-The estimated wait displays 0 minutes even though multiple customers are ahead. Trace the backend calculation and frontend display. Compare the implementation with docs/03-flows-rules.md. Correct the calculation for service durations, barber eligibility, active barbers, current in-chair work and rounding. Handle zero available barbers and missing service durations safely. Add tests for 0, 1 and multiple customers ahead.
-Prompt 24 — Reception tablet UI refinement
-On the Reception Dashboard, barber cards are too small on a tablet. Refine only this screen: use a clear 3-column barber-card row at the target tablet landscape width, make the time-left indicator a progress bar, preserve readable queue details and touch-friendly actions, and keep the layout responsive at smaller widths. Do not change queue logic or other screens.
-Prompt 25 — Accessibility, responsive and translation audit
-Audit every route on phone, tablet and desktop. Ensure tap targets are at least 44px, text contrast is readable, keyboard focus is visible, dialogs are accessible, forms have labels, loading/error/empty states are clear, and no content overflows. Switch the entire app to Gujarati and inspect every label, validation message, button and status. Fix missing translations through the shared language files; do not hard-code one-off labels.
-F. Deployment preparation
-Prompt 26 — Pre-deployment audit
-Prepare the existing application for separate frontend and backend deployment on Render. Inspect package.json files, scripts, TypeScript build output, start commands, port binding, health endpoint, CORS, Socket.IO, environment variables, database connection, migrations, static asset paths and frontend API URL. Ensure the backend listens on process.env.PORT and 0.0.0.0 where required. Ensure production frontend uses the deployed backend URL, not localhost. Provide exact Render service settings and a checklist. Do not deploy or change providers without explaining the required configuration.
-Prompt 27 — Fix Render filesystem database error (/var/data)
-Render logs show: EACCES: permission denied, mkdir '/var/data'. Trace why the application tries to create or write to /var/data and identify whether the current database is SQLite or another local-file store. Do not blindly change permissions or write to an arbitrary directory. The production target is hosted PostgreSQL, so prioritize migrating the backend to PostgreSQL using DATABASE_URL and remove the local-file dependency. Preserve all queue, user, authentication and admin functionality. Update schema/migrations and queries safely, add connection pooling where appropriate, and verify the backend build and startup. Do not modify the frontend unnecessarily. Never expose credentials. Report changed files, required environment variable names, migration steps and Git commands.
-Prompt 28 — Neon PostgreSQL migration
-Migrate the backend database from local SQLite/file storage to hosted PostgreSQL (Neon). Use DATABASE_URL from the environment; do not hard-code the connection string. Audit all schema definitions, SQL syntax, data types, ID generation, transactions, date/time handling and queries for PostgreSQL compatibility. Create repeatable migrations and a safe initial schema/seed procedure. Preserve authentication, users/roles, services, barbers, queue entries, settings and statistics. Remove all production references to /var/data and local database files. Add connection error handling and a health check that verifies database connectivity without leaking secrets. Build, type-check and test every major API flow. Provide exact Render environment variable names and deployment steps.
-Prompt 29 — Fix JWT_SECRET startup failure
-Render deployment crashes with: JWT_SECRET must be configured with at least 32 bytes. Inspect the code to confirm the expected environment variable name and validation. Do not weaken or remove the security check. Explain how to generate a cryptographically random secret of at least 32 bytes and set it in the Render backend service environment settings. Ensure .env files and secret values are not committed or printed. Verify the service starts after the variable is configured and authentication still works.
-Prompt 30 — Render backend service configuration
-Configure the backend as a Render Web Service connected to the GitHub repository. Use the correct backend root directory (or repository root with the appropriate prefix), install/build command and start command based on the actual package scripts. Set required environment variables such as NODE_ENV, DATABASE_URL, JWT_SECRET, FRONTEND_ORIGINS and any other variables discovered in the code. Bind to Render's PORT. Add /api/health as the health check path. Confirm PostgreSQL connectivity, CORS, authentication and Socket.IO. Do not include secret values in documentation or Git.
-Prompt 31 — Render frontend service configuration
-Deploy the frontend separately on Render as a Static Site connected to the same GitHub repository. Inspect the actual repository structure and package scripts before choosing the root directory, build command and publish directory. Configure the frontend's production API base URL to the deployed backend URL using the framework's supported build-time environment variable. Add SPA fallback/rewrite rules so refreshing /join, /status/:id, /reception, /barber/:barberId, /display and /admin does not return 404. Confirm the deployed frontend can call the backend and open Socket.IO connections. Do not put backend secrets in frontend environment variables.
-Prompt 32 — Final production smoke test
-After deployment, test the actual public frontend URL and backend health URL. Verify Home loads, direct route refresh works, Join Queue submits to production PostgreSQL, status updates live, reception actions work, barber Start/Done works, display updates, admin settings persist, login and role permissions work, CORS is correct, and no localhost URLs or secrets appear in browser assets/logs. Check Render logs for startup/runtime errors. Report exact PASS/FAIL results and any remaining issue. Do not claim deployment is complete until the live end-to-end flow works.
-Prompt 33 — README and handover
-Update README.md with the project overview, feature list, technology stack, local setup, required environment variable NAMES (never values), database migration/setup, test commands, deployment architecture and live demo links. Put the live demo link immediately below the project title. Document safe test accounts only if they are intentionally created and safe to share. Add a short architecture explanation and known limitations. Ensure prompts.md contains the prompts actually used in chronological order; mark reconstructed prompts clearly rather than presenting them as exact historical messages.
-G. Operational notes and safe deployment checklist
-- Keep secrets such as DATABASE_URL and JWT_SECRET only in local ignored .env files or the hosting provider's secret/environment settings. Never paste real credentials into prompts, README, screenshots or Git commits.
-- Do not use /var/data unless a correctly configured persistent disk is explicitly attached and the application is intentionally designed for file persistence. For this project, the chosen production direction is hosted PostgreSQL.
-- Backend must use the hosting provider's PORT and expose a health endpoint. Frontend must use the deployed backend URL and must not contain localhost production endpoints.
-- Configure FRONTEND_ORIGINS with the exact frontend origin(s). Configure SPA fallback for all client-side routes.
-- After each meaningful change: run install if needed, build, type-check, tests, inspect git diff, commit, push, and verify the deployed result.
-- Keep queue business rules centralized. Never fix a UI issue by bypassing backend authorization or changing queue semantics.
-- Test using separate browser windows/devices to confirm real-time synchronization.
-Historical prompt coverage and limitations
-The source project guide recovered from the user's file library contains the original brief/screen/flow/AGENTS examples, eight-step build plan, queue-rule examples, bug prompts, deployment examples and submission checklist. The later project history confirms additional prompts for the Barber Dashboard, full completion/audit, /var/data permission failure, Neon PostgreSQL migration, JWT_SECRET startup failure, and separate frontend/backend deployment.
+## 1.3 Project Description
 
-This document organizes those requirements into a chronological prompt book. Some later prompts are consolidated reconstructions because the full verbatim text of every prior chat message was not available. Use this as the single master prompt document, and keep an actual prompts.md in the repository that records the exact prompts submitted during future work.
+The Salon Queue Management System is a web-based application designed to manage salon appointments, walk-in customers, barber assignments, and real-time queue updates.
+
+The system provides separate dashboards for customers, receptionists, barbers, and administrators.
+
+## 1.4 Technology Stack
+
+| Layer | Technology |
+|---|---|
+| Frontend | React.js, Vite, TypeScript |
+| Styling | Tailwind CSS |
+| Backend | Node.js, Express.js, TypeScript |
+| Database | PostgreSQL |
+| Database Hosting | Neon |
+| Authentication | JWT |
+| Real-time Updates | Socket.IO |
+| Deployment | Render |
+| Version Control | Git and GitHub |
+
+## 1.5 Main Application Routes
+
+| Route | Description |
+|---|---|
+| `/` | Home Page |
+| `/join` | Join Queue |
+| `/status/:id` | Customer Queue Status |
+| `/reception` | Reception Dashboard |
+| `/barber/:barberId` | Barber Dashboard |
+| `/display` | Public TV Display |
+| `/admin` | Admin Dashboard |
+
+---
+
+# 2. Table of Contents
+
+## Phase 01: Project Planning
+- Prompt 01: Analyze Project Requirements
+- Prompt 02: Create Project Specification
+- Prompt 03: Define Application Screens
+- Prompt 04: Define Queue Management Rules
+
+## Phase 02: Project Setup
+- Prompt 05: Create AGENTS.md
+- Prompt 06: Initialize Project Structure
+
+## Phase 03: Frontend Development
+- Prompt 07: Develop Home Page
+- Prompt 08: Develop Join Queue Page
+- Prompt 09: Develop Customer Status Page
+- Prompt 10: Develop Reception Dashboard
+- Prompt 11: Develop Barber Dashboard
+- Prompt 12: Develop Public Display
+- Prompt 13: Develop Admin Dashboard
+
+## Phase 04: Backend Development
+- Prompt 14: Develop Backend APIs
+- Prompt 15: Implement Queue Management Engine
+- Prompt 16: Implement Real-Time Updates
+- Prompt 17: Configure PostgreSQL Database
+
+## Phase 05: Authentication
+- Prompt 18: Implement Authentication and Authorization
+- Prompt 19: Fix Login Issues
+- Prompt 20: Configure CORS
+
+## Phase 06: Testing and Improvements
+- Prompt 21: Test Application Features
+- Prompt 22: Fix Application Bugs
+- Prompt 23: Fix Queue Ordering
+- Prompt 24: Improve Waiting-Time Calculation
+- Prompt 25: Improve Responsive Design
+- Prompt 26: Improve Accessibility and Language Support
+
+## Phase 07: Production Preparation
+- Prompt 27: Perform Production Audit
+- Prompt 28: Fix Render Filesystem Error
+- Prompt 29: Configure Neon PostgreSQL
+- Prompt 30: Fix JWT Secret Configuration
+
+## Phase 08: Deployment
+- Prompt 31: Deploy Backend on Render
+- Prompt 32: Deploy Frontend on Render
+- Prompt 33: Perform Production Testing
+
+## Phase 09: Documentation
+- Prompt 34: Create README.md
+- Prompt 35: Perform Final Project Audit
+
+---
+
+# 3. Phase 01: Project Planning
+
+## Prompt 01: Analyze Project Requirements
+
+```text
+Act as a senior software architect.
+
+Analyze the requirements of a Salon Queue Management System.
+
+Identify:
+- Main users and their roles.
+- Required application features.
+- Frontend pages.
+- Backend APIs.
+- Database entities.
+- Queue management workflow.
+- Authentication requirements.
+- Security requirements.
+- Real-time functionality.
+
+Provide a complete technical plan before writing any code.
+
+Do not start implementation until the architecture is clearly defined.
+```
+
+## Prompt 02: Create Project Specification
+
+```text
+Create a complete Software Requirements Specification (SRS) for the Salon Queue Management System.
+
+Include:
+1. Project introduction.
+2. Project objectives.
+3. Functional requirements.
+4. Non-functional requirements.
+5. User roles.
+6. System architecture.
+7. Database requirements.
+8. API requirements.
+9. Security requirements.
+10. Deployment requirements.
+
+Keep the documentation professional, clear, and suitable for a real-world software project.
+```
+
+## Prompt 03: Define Application Screens
+
+```text
+Design the complete screen structure for the Salon Queue Management System.
+
+Required screens:
+
+1. Home Page
+2. Join Queue Page
+3. Customer Status Page
+4. Reception Dashboard
+5. Barber Dashboard
+6. Public TV Display
+7. Admin Dashboard
+
+For every screen, define:
+- Purpose.
+- Layout.
+- Components.
+- Buttons.
+- Input fields.
+- User interactions.
+- Responsive behavior.
+
+Maintain a consistent design system throughout the application.
+```
+
+## Prompt 04: Define Queue Management Rules
+
+```text
+Design a reliable queue management system for a salon.
+
+Queue statuses:
+
+- Waiting
+- Called
+- In Chair
+- Done
+- Cancelled
+- No-show
+
+Business rules:
+
+1. Customers should be served according to queue order.
+2. Customers can select a preferred barber.
+3. A specific barber preference must never be overridden.
+4. Customers without a preference can be assigned to eligible available barbers.
+5. One barber can serve only one active customer at a time.
+6. A customer should have only one active queue entry per phone number.
+7. A customer who does not arrive within 10 minutes after being called may be marked No-show.
+8. A customer rejoining after No-show receives a new token at the end of the queue.
+9. Online queue registration closes 30 minutes before salon closing.
+10. Receptionists can still add walk-in customers.
+11. Barber breaks must be handled without silently changing customer assignments.
+12. Waiting-time estimates should consider available barbers and services ahead.
+
+Explain the complete queue workflow and implement these rules consistently.
+```
+
+---
+
+# 4. Phase 02: Project Setup
+
+## Prompt 05: Create AGENTS.md
+
+```text
+Create an AGENTS.md file for the Salon Queue Management System.
+
+The project uses:
+
+Frontend:
+- React
+- Vite
+- TypeScript
+- Tailwind CSS
+
+Backend:
+- Node.js
+- Express
+- TypeScript
+
+Database:
+- PostgreSQL
+
+Other technologies:
+- Socket.IO
+- JWT Authentication
+
+Define:
+- Project architecture.
+- Coding standards.
+- Folder structure.
+- Naming conventions.
+- API conventions.
+- Database conventions.
+- Authentication rules.
+- Security requirements.
+- Testing guidelines.
+
+Important:
+Always inspect existing files before modifying them.
+Do not unnecessarily rewrite working code.
+Do not introduce duplicate implementations.
+Do not expose secrets.
+```
+
+## Prompt 06: Initialize Project Structure
+
+```text
+Initialize the Salon Queue Management System using the approved architecture.
+
+Create a clean and maintainable project structure.
+
+Separate frontend and backend.
+
+Configure:
+- React with Vite.
+- TypeScript.
+- Tailwind CSS.
+- Express backend.
+- PostgreSQL connection.
+- Environment variables.
+- Development scripts.
+
+Ensure frontend and backend can run independently.
+
+Provide all commands required to install dependencies and start the application locally.
+```
+
+---
+
+# 5. Phase 03: Frontend Development
+
+## Prompt 07: Develop Home Page
+
+```text
+Build a premium home page for the Salon Queue Management System.
+
+Design requirements:
+
+- Premium charcoal and dark background.
+- Gold accent color: #D4A017.
+- Cream-colored text and surfaces.
+- Modern typography.
+- Professional salon branding.
+- Responsive layout.
+- Smooth transitions.
+- Clean navigation.
+
+Include:
+
+1. Navigation bar.
+2. Hero section.
+3. Join Queue button.
+4. Salon services section.
+5. How It Works section.
+6. Barber information.
+7. Contact information.
+8. Footer.
+
+Use reusable React components.
+
+Make the interface professional and mobile-friendly.
+```
+
+## Prompt 08: Develop Join Queue Page
+
+```text
+Develop the Join Queue page.
+
+Required fields:
+
+- Customer name.
+- Phone number.
+- Selected service.
+- Preferred barber.
+- Additional notes.
+
+Features:
+
+1. Validate all required fields.
+2. Validate phone number.
+3. Display available services.
+4. Display available barbers.
+5. Allow customers to select a preferred barber.
+6. Submit queue registration to the backend.
+7. Display the generated token.
+8. Redirect to the customer status page.
+
+Show clear loading, success, and error messages.
+
+Use responsive design and proper form validation.
+```
+
+## Prompt 09: Develop Customer Status Page
+
+```text
+Develop the Customer Queue Status page.
+
+Display:
+
+- Customer name.
+- Token number.
+- Queue position.
+- Selected service.
+- Assigned barber.
+- Current queue status.
+- Estimated waiting time.
+- Number of customers ahead.
+
+Use Socket.IO for real-time updates.
+
+Automatically update queue information when the queue changes.
+
+Do not expose sensitive customer information.
+```
+
+## Prompt 10: Develop Reception Dashboard
+
+```text
+Build a professional Reception Dashboard.
+
+Features:
+
+1. View all queue entries.
+2. Add walk-in customers.
+3. Search customers.
+4. Filter by queue status.
+5. Assign barbers.
+6. Call the next customer.
+7. Mark customers as In Chair.
+8. Mark customers as Done.
+9. Mark customers as No-show.
+10. Cancel queue entries.
+11. View estimated waiting times.
+
+Include confirmation dialogs for important actions.
+
+Use real-time updates and responsive tables.
+```
+
+## Prompt 11: Develop Barber Dashboard
+
+```text
+Build a Barber Dashboard.
+
+Display:
+
+- Barber profile.
+- Current customer.
+- Current service.
+- Queue information.
+- Upcoming customers.
+- Work status.
+
+Features:
+
+1. Start service.
+2. Complete service.
+3. Update availability.
+4. Start break.
+5. End break.
+6. View service history.
+
+A barber must not receive another active customer while already serving someone.
+
+Ensure all actions are synchronized with the backend.
+```
+
+## Prompt 12: Develop Public TV Display
+
+```text
+Build a full-screen Public TV Display for the salon.
+
+Display:
+
+- Current token being served.
+- Customer token called next.
+- Available barbers.
+- Waiting queue.
+- Salon announcements.
+
+Design requirements:
+
+- Large readable text.
+- High contrast.
+- Full-screen layout.
+- Automatic updates.
+- Professional appearance.
+
+Never display customer phone numbers or sensitive personal information.
+```
+
+## Prompt 13: Develop Admin Dashboard
+
+```text
+Build an Admin Dashboard for the Salon Queue Management System.
+
+Features:
+
+1. Dashboard statistics.
+2. Manage barbers.
+3. Manage services.
+4. Manage employees.
+5. Manage users.
+6. Manage queue settings.
+7. Configure opening and closing times.
+8. View completed services.
+9. View cancelled entries.
+10. View no-show records.
+
+Use role-based access control.
+
+Only authorized administrators should access administrative features.
+```
+
+---
+
+# 6. Phase 04: Backend Development
+
+## Prompt 14: Develop Backend APIs
+
+```text
+Develop the backend using Node.js, Express, and TypeScript.
+
+Create REST APIs for:
+
+- Authentication.
+- Customer registration.
+- Queue management.
+- Barber management.
+- Service management.
+- Reception operations.
+- Admin operations.
+- Dashboard statistics.
+
+Requirements:
+
+1. Use proper HTTP methods.
+2. Validate request data.
+3. Use centralized error handling.
+4. Use appropriate HTTP status codes.
+5. Follow a modular folder structure.
+6. Protect private routes.
+7. Use environment variables.
+8. Avoid duplicate business logic.
+
+Ensure all APIs work correctly with the React frontend.
+```
+
+## Prompt 15: Implement Queue Management Engine
+
+```text
+Implement the complete queue management engine.
+
+Requirements:
+
+1. Generate unique queue tokens.
+2. Maintain queue ordering.
+3. Assign customers to eligible barbers.
+4. Respect preferred barber selections.
+5. Prevent double assignment.
+6. Prevent multiple active queue entries for the same phone number.
+7. Handle customer cancellation.
+8. Handle No-show.
+9. Handle barber availability.
+10. Handle barber breaks.
+11. Update customer status.
+12. Maintain queue history.
+
+Use database transactions where required.
+
+Ensure concurrent requests cannot create inconsistent queue states.
+```
+
+## Prompt 16: Implement Real-Time Updates
+
+```text
+Implement Socket.IO for real-time communication.
+
+Required events:
+
+- queue:created
+- queue:updated
+- queue:called
+- queue:completed
+- queue:cancelled
+- barber:updated
+- display:updated
+
+Requirements:
+
+1. Update customer status automatically.
+2. Update reception dashboard.
+3. Update barber dashboard.
+4. Update public display.
+5. Handle disconnected clients.
+6. Avoid duplicate event processing.
+7. Ensure authorized users receive appropriate data.
+
+Do not expose private customer information through public events.
+```
+
+## Prompt 17: Configure PostgreSQL Database
+
+```text
+Configure PostgreSQL as the primary database.
+
+Create appropriate tables for:
+
+- Users.
+- Customers.
+- Barbers.
+- Services.
+- Queue Entries.
+- Appointments.
+- Salon Settings.
+- Queue History.
+
+Requirements:
+
+1. Use proper primary keys.
+2. Define foreign keys.
+3. Add appropriate indexes.
+4. Use timestamps.
+5. Add constraints.
+6. Prevent duplicate active queue entries.
+7. Use migrations.
+8. Configure DATABASE_URL.
+
+Ensure the database works with Neon PostgreSQL in production.
+```
+
+---
+
+# 7. Phase 05: Authentication and Security
+
+## Prompt 18: Implement Authentication and Authorization
+
+```text
+Implement secure JWT authentication.
+
+Roles:
+
+- Customer.
+- Receptionist.
+- Barber.
+- Owner/Admin.
+
+Requirements:
+
+1. Secure login.
+2. Password hashing.
+3. JWT access tokens.
+4. Protected routes.
+5. Role-based authorization.
+6. Token expiration.
+7. Secure logout.
+8. Proper validation.
+9. Secure error handling.
+
+Ensure users can access only the features permitted by their roles.
+
+Never store plaintext passwords.
+```
+
+## Prompt 19: Fix Login Issues
+
+```text
+Perform a complete investigation of the login and authentication system.
+
+Check:
+
+1. Frontend login form.
+2. Backend login API.
+3. Database user records.
+4. Password hashing.
+5. Password comparison.
+6. JWT generation.
+7. JWT_SECRET configuration.
+8. Token storage.
+9. Authentication middleware.
+10. Role-based authorization.
+11. CORS configuration.
+12. Production API URL.
+
+Identify the actual root cause.
+
+Fix the issue properly without bypassing authentication or weakening security.
+
+Test login for all required roles.
+```
+
+## Prompt 20: Configure CORS
+
+```text
+Configure production-ready CORS.
+
+Requirements:
+
+1. Allow the local frontend during development.
+2. Allow the deployed frontend in production.
+3. Use exact frontend origins.
+4. Support required HTTP methods.
+5. Support required headers.
+6. Configure credentials correctly.
+7. Do not use wildcard origins with credentials.
+
+Read allowed origins from environment variables.
+
+Verify frontend-backend communication locally and in production.
+```
+
+---
+
+# 8. Phase 06: Testing and Improvements
+
+## Prompt 21: Test Application Features
+
+```text
+Perform complete functional testing of the Salon Queue Management System.
+
+Test:
+
+1. Customer registration.
+2. Queue token generation.
+3. Queue ordering.
+4. Barber assignment.
+5. Preferred barber selection.
+6. Reception operations.
+7. Barber operations.
+8. Admin operations.
+9. Real-time updates.
+10. Authentication.
+11. Authorization.
+12. Database persistence.
+
+Identify failing test cases.
+
+Fix all critical issues and verify the results.
+```
+
+## Prompt 22: Fix Application Bugs
+
+```text
+Inspect the complete application and identify bugs.
+
+Check:
+
+- Frontend errors.
+- Backend errors.
+- API failures.
+- Database errors.
+- Authentication problems.
+- Incorrect queue ordering.
+- Real-time synchronization.
+- Responsive design.
+- Form validation.
+- Production configuration.
+
+For every issue:
+
+1. Identify the root cause.
+2. Explain why it happens.
+3. Fix the actual problem.
+4. Test the fix.
+5. Avoid breaking existing features.
+
+Do not make unnecessary changes to working code.
+```
+
+## Prompt 23: Fix Queue Ordering
+
+```text
+Audit the queue ordering implementation.
+
+Ensure:
+
+1. Customers are served in the correct order.
+2. Preferred barber customers are assigned only to their selected barber.
+3. Customers without preferences can be assigned to eligible available barbers.
+4. Called customers remain in the correct state.
+5. No-show customers are handled correctly.
+6. Rejoined customers receive new tokens.
+7. Completed customers are removed from the active queue.
+
+Test multiple customers and multiple barbers.
+
+Fix any race conditions or incorrect ordering.
+```
+
+## Prompt 24: Improve Waiting-Time Calculation
+
+```text
+Improve the estimated waiting-time calculation.
+
+Consider:
+
+- Number of customers ahead.
+- Service duration.
+- Available barbers.
+- Current barber workload.
+- Preferred barber restrictions.
+- Barber breaks.
+- Current service in progress.
+
+Handle situations where no barbers are available.
+
+Display realistic estimated waiting times.
+
+Keep the calculation consistent between the customer page and reception dashboard.
+```
+
+## Prompt 25: Improve Responsive Design
+
+```text
+Perform a complete responsive design audit.
+
+Test the application on:
+
+- Mobile phones.
+- Tablets.
+- Laptops.
+- Desktop screens.
+- Large displays.
+
+Check:
+
+1. Navigation.
+2. Forms.
+3. Tables.
+4. Dashboards.
+5. Buttons.
+6. Cards.
+7. Typography.
+8. Spacing.
+9. Scrolling.
+10. Public TV display.
+
+Fix layout issues without changing the existing visual identity.
+```
+
+## Prompt 26: Improve Accessibility and Language Support
+
+```text
+Improve application accessibility and language support.
+
+Requirements:
+
+1. Support English and Gujarati.
+2. Use readable typography.
+3. Add appropriate labels.
+4. Support keyboard navigation.
+5. Provide visible focus states.
+6. Maintain sufficient color contrast.
+7. Add meaningful error messages.
+8. Avoid inaccessible interactions.
+
+Ensure translations are consistent across all application screens.
+```
+
+---
+
+# 9. Phase 07: Production Preparation
+
+## Prompt 27: Perform Production Audit
+
+```text
+Perform a complete production-readiness audit.
+
+Inspect:
+
+1. Frontend build.
+2. Backend build.
+3. Database connection.
+4. Environment variables.
+5. Authentication.
+6. CORS.
+7. API endpoints.
+8. Socket.IO.
+9. Error handling.
+10. Security.
+11. Deployment configuration.
+
+Identify all issues that could prevent production deployment.
+
+Fix them without introducing unnecessary dependencies or changing the architecture.
+```
+
+## Prompt 28: Fix Render Filesystem Error
+
+```text
+The application is failing on Render with the following error:
+
+EACCES: permission denied, mkdir '/var/data'
+
+Investigate the root cause.
+
+Inspect the database connection and filesystem usage.
+
+The production application must use hosted PostgreSQL instead of relying on a local SQLite database or an unavailable filesystem directory.
+
+Remove inappropriate production filesystem dependencies.
+
+Preserve local development functionality where possible.
+
+Do not use unsafe permission workarounds.
+```
+
+## Prompt 29: Configure Neon PostgreSQL
+
+```text
+Configure Neon PostgreSQL for production.
+
+Requirements:
+
+1. Use DATABASE_URL.
+2. Configure the PostgreSQL connection pool.
+3. Support SSL when required.
+4. Handle connection errors.
+5. Run database migrations.
+6. Verify schema creation.
+7. Verify database persistence.
+8. Test production queries.
+
+Ensure the application does not depend on a local database file in production.
+
+Never hardcode database credentials.
+```
+
+## Prompt 30: Fix JWT Secret Configuration
+
+```text
+Render deployment is failing with:
+
+JWT_SECRET must be configured with at least 32 bytes.
+
+Investigate the authentication configuration.
+
+Requirements:
+
+1. Configure JWT_SECRET through Render environment variables.
+2. Use a strong random secret of at least 32 bytes.
+3. Validate the secret during application startup.
+4. Never hardcode the secret.
+5. Never expose the secret in frontend code.
+6. Never commit secrets to GitHub.
+7. Keep production and development secrets separate.
+
+Do not remove or weaken the security validation.
+
+Verify that the backend starts successfully after configuration.
+```
+
+---
+
+# 10. Phase 08: Deployment on Render
+
+## Prompt 31: Deploy Backend on Render
+
+```text
+Prepare and deploy the backend separately on Render.
+
+Backend technology:
+
+- Node.js.
+- Express.
+- TypeScript.
+- PostgreSQL.
+- Socket.IO.
+
+Requirements:
+
+1. Configure the correct root directory.
+2. Configure the build command.
+3. Configure the start command.
+4. Configure environment variables.
+5. Configure DATABASE_URL.
+6. Configure JWT_SECRET.
+7. Configure FRONTEND_ORIGINS.
+8. Verify the health endpoint.
+9. Check deployment logs.
+10. Verify database connectivity.
+
+Do not expose secrets.
+
+Ensure the backend is production-ready.
+```
+
+## Prompt 32: Deploy Frontend on Render
+
+```text
+Prepare and deploy the frontend separately on Render.
+
+Frontend technology:
+
+- React.
+- Vite.
+- TypeScript.
+- Tailwind CSS.
+
+Requirements:
+
+1. Configure the correct root directory.
+2. Configure the build command.
+3. Configure the publish directory.
+4. Configure the production backend API URL.
+5. Configure frontend environment variables.
+6. Support client-side routing.
+7. Verify all application routes.
+8. Test frontend-backend communication.
+
+Ensure the deployed frontend works correctly with the deployed backend.
+```
+
+## Prompt 33: Perform Production Testing
+
+```text
+Perform complete end-to-end testing of the deployed application.
+
+Test:
+
+1. Home page.
+2. Customer registration.
+3. Queue token generation.
+4. Customer status.
+5. Reception dashboard.
+6. Barber dashboard.
+7. Admin dashboard.
+8. Public display.
+9. Login and logout.
+10. Real-time updates.
+11. Database persistence.
+12. Mobile responsiveness.
+
+Check browser console errors and Render backend logs.
+
+Fix all critical production issues.
+
+Confirm that the application works correctly after refreshing pages and restarting services.
+```
+
+---
+
+# 11. Phase 09: Documentation
+
+## Prompt 34: Create README.md
+
+```text
+Create a professional README.md file for the Salon Queue Management System.
+
+Include:
+
+1. Project title.
+2. Project description.
+3. Features.
+4. Technology stack.
+5. Screenshots section.
+6. Application architecture.
+7. Project folder structure.
+8. Installation instructions.
+9. Environment variable setup.
+10. Local development commands.
+11. Database setup.
+12. Deployment instructions.
+13. Live application URL.
+14. Future improvements.
+
+Use proper Markdown headings, tables, lists, and code blocks.
+
+Make the README suitable for a professional GitHub repository.
+```
+
+## Prompt 35: Perform Final Project Audit
+
+```text
+Act as a senior software engineer performing a final project review.
+
+Inspect the complete Salon Queue Management System.
+
+Verify:
+
+1. Frontend functionality.
+2. Backend functionality.
+3. Database integration.
+4. Authentication.
+5. Authorization.
+6. Queue management logic.
+7. Real-time updates.
+8. Responsive design.
+9. Error handling.
+10. Security.
+11. Production deployment.
+12. GitHub documentation.
+
+Identify incomplete features and technical weaknesses.
+
+Fix critical issues.
+
+Provide a final report containing:
+
+- Completed features.
+- Fixed issues.
+- Remaining limitations.
+- Security improvements.
+- Deployment status.
+- Recommended future enhancements.
+
+Do not claim a feature is working unless it has been tested.
+```
+
+---
+
+# 12. Project Folder Structure
+
+```text
+salon_site/
+│
+├── frontend/
+│   ├── src/
+│   │   ├── components/
+│   │   ├── pages/
+│   │   ├── hooks/
+│   │   ├── services/
+│   │   ├── context/
+│   │   ├── types/
+│   │   └── App.tsx
+│   │
+│   ├── public/
+│   ├── package.json
+│   └── vite.config.ts
+│
+├── backend/
+│   ├── src/
+│   │   ├── config/
+│   │   ├── controllers/
+│   │   ├── middleware/
+│   │   ├── models/
+│   │   ├── routes/
+│   │   ├── services/
+│   │   ├── socket/
+│   │   ├── utils/
+│   │   └── server.ts
+│   │
+│   ├── package.json
+│   └── tsconfig.json
+│
+├── AGENTS.md
+├── README.md
+├── prompts.md
+└── .gitignore
+```
+
+---
+
+# 13. Security Checklist
+
+## Authentication
+- [ ] Passwords are hashed.
+- [ ] JWT authentication is implemented.
+- [ ] JWT_SECRET is configured securely.
+- [ ] Protected routes are working.
+- [ ] Role-based access control is implemented.
+
+## Database
+- [ ] PostgreSQL is used in production.
+- [ ] DATABASE_URL is stored securely.
+- [ ] Database migrations are configured.
+- [ ] Database constraints are implemented.
+
+## Deployment
+- [ ] Backend is deployed on Render.
+- [ ] Frontend is deployed on Render.
+- [ ] Production API URL is configured.
+- [ ] CORS is configured correctly.
+- [ ] Socket.IO works in production.
+- [ ] Application works after refresh.
+
+## GitHub
+- [ ] `.env` is not committed.
+- [ ] Database credentials are not committed.
+- [ ] JWT secrets are not committed.
+- [ ] `.gitignore` is configured.
+- [ ] README.md is updated.
+- [ ] prompts.md is updated.
+
+---
+
+# 14. Live Project
+
+## Salon Queue Management System
+
+**Live Application:**
+
+https://salon-management-system-1-dbkv.onrender.com/
+
+---
+
+# 15. Documentation Information
+
+| Field | Details |
+|---|---|
+| Project | Salon Queue Management System |
+| Documentation | AI Development Prompts |
+| File Name | prompts.md |
+| Format | Markdown |
+| Total Prompts | 35 |
+| Development Approach | AI-Assisted Development |
+| Deployment Platform | Render |
+| Database | Neon PostgreSQL |
+
+---
+
+**End of Documentation**
