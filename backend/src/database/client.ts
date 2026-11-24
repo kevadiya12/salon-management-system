@@ -76,7 +76,7 @@ export class Database {
 
 export function createPool(config: PoolConfig): Database {
   const pool = new Pool(config);
-  pool.on('error', (error) => {
+  pool.on('error', (error: Error) => {
     console.error('Unexpected PostgreSQL pool error:', error);
   });
   return new Database(pool);

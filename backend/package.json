@@ -21,11 +21,13 @@
     "dotenv": "^16.6.1",
     "express": "^5.1.0",
     "jose": "^6.2.18",
+    "pg": "^8.23.1",
     "socket.io": "^4.8.1"
   },
   "devDependencies": {
     "@types/express": "^5.0.3",
     "@types/node": "^22.16.5",
+    "@types/pg": "^8.23.1",
     "tsx": "^4.20.5",
     "typescript": "~5.9.2"
   },
