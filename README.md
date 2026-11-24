@@ -2,6 +2,10 @@
 
 A full-stack salon queue application built with React, Vite, TypeScript, Tailwind CSS, React Router, Express, Neon PostgreSQL, and Socket.IO.
 
+#Live url
+
+https://salon-management-system-1-dbkv.onrender.com/
+
 ## Documentation
 
 - [Project overview](docs/01-project-overview.md)
