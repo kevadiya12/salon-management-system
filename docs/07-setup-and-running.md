@@ -90,6 +90,17 @@ Invalid theme hex values fail frontend module initialization with a descriptive 
 
 Branding is not persisted by the backend and cannot be changed through the UI or API. In production, set the Vite variables before building and serve the frontend and backend with matching origin and CORS configuration. Use HTTPS in production; the authentication cookie is marked `Secure` when `NODE_ENV=production`.
 
+## Single-service Render deployment
+
+Configure the Render Web Service with the repository root as its root directory. Build both applications and start the backend from that same directory:
+
+```text
+Build command: npm run build --prefix backend && npm run build --prefix frontend
+Start command: npm start --prefix backend
+```
+
+Set the existing `JWT_SECRET` in Render. The service's own origin is allowed automatically; `FRONTEND_ORIGINS` continues to allow additional origins, with localhost defaults for development. Leave `VITE_SOCKET_URL` unset so the frontend uses same-origin `/api` requests and `/socket.io` connections. Attach persistent storage for SQLite and set the existing `DB_PATH` to a database file on that storage; otherwise the database may be lost when the service is replaced.
+
 ## Other scripts
 
 Backend: `npm run build`, `npm run start`, `npm run typecheck`, `npm test`.

@@ -11,16 +11,49 @@ import { errorHandler } from './middleware/error-handler.js';
 import { requestLogger } from './middleware/request-logger.js';
 import { registerSocketHandlers } from './socket/index.js';
 import { assertJwtSecretConfigured } from './services/auth.service.js';
+import { existsSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const frontendDistPath = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  '../../frontend/dist',
+);
+const frontendIndexPath = resolve(frontendDistPath, 'index.html');
 
 assertJwtSecretConfigured();
 const database = createDatabase();
 initializeReceptionSchema(database);
 const app = express();
 
+const isAllowedOrigin = (
+  origin: string | undefined,
+  host: string | undefined,
+): boolean => {
+  if (!origin) {
+    return true;
+  }
+  if (config.frontendOrigins.includes(origin)) {
+    return true;
+  }
+  if (!host) {
+    return false;
+  }
+  try {
+    const parsedOrigin = new URL(origin);
+    return (
+      ['http:', 'https:'].includes(parsedOrigin.protocol) &&
+      parsedOrigin.host === host.toLowerCase()
+    );
+  } catch {
+    return false;
+  }
+};
+
 app.disable('x-powered-by');
 app.use((request, response, next) => {
   const origin = request.get('origin');
-  if (origin && !config.frontendOrigins.includes(origin)) {
+  if (!isAllowedOrigin(origin, request.get('host'))) {
     response.status(403).json({
       success: false,
       message: 'This origin is not allowed to access the API.',
@@ -47,13 +80,16 @@ const httpServer = createServer(app);
 const socketServer = new SocketServer(httpServer, {
   cors: {
     credentials: true,
-    origin: (origin, callback) => {
-      if (!origin || config.frontendOrigins.includes(origin)) {
-        callback(null, true);
-        return;
-      }
-      callback(new Error('This origin is not allowed to access Socket.IO.'));
-    },
+    origin: true,
+  },
+  allowRequest: (request, callback) => {
+    const origin = request.headers.origin;
+    const host = request.headers.host;
+    const allowed = isAllowedOrigin(origin, host);
+    callback(
+      allowed ? null : 'This origin is not allowed to access Socket.IO.',
+      allowed,
+    );
   },
 });
 
@@ -67,6 +103,19 @@ app.use('/api', (_request, response) => {
     message: 'API endpoint not found.',
   });
 });
+if (existsSync(frontendIndexPath)) {
+  app.use(express.static(frontendDistPath));
+  app.get('/{*path}', (request, response, next) => {
+    if (
+      request.path === '/socket.io' ||
+      request.path.startsWith('/socket.io/')
+    ) {
+      next();
+      return;
+    }
+    response.sendFile(frontendIndexPath);
+  });
+}
 app.use(errorHandler);
 
 httpServer.listen(config.port, () => {
